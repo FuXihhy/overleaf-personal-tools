@@ -1,15 +1,15 @@
 # 安装后验收：先自动检查，再完成最少的真实交互
 
-本指南面向安装本分支的 Windows 用户。验收脚本把构建、本机连接安装和检查集中到一个入口；登录、Chrome 加载扩展和实际问答仍由用户完成。**自动检查通过不等于浏览器交互已经通过**：只有你实际看到回答、预览和刷新后的历史，才能把相应项目记为通过。macOS 用户可以复用本页的合成项目、提问和通过标准，但应使用 [macOS 本机安装说明](../docs/codex-backend.md)，不要运行 Windows 脚本或 ACL 配置器。
+本指南的自动脚本面向 Windows，真实交互部分可供 macOS 用户复用。验收脚本把构建、本机连接安装和检查集中到一个入口；登录、Chrome 加载扩展和实际问答仍由用户完成。**自动检查通过不等于浏览器交互已经通过**：只有你实际看到回答、预览和刷新后的历史，才能把相应项目记为通过。macOS 用户可以复用本页的合成项目、提问和通过标准，但应使用 [macOS 安装步骤](../docs/installation.md#2-macos-本机连接)，不要运行 Windows 脚本或 ACL 配置器。
 
 ## 1. 运行一次安装与自动检查
 
-准备 Chrome 145+、Node.js 22+、pnpm 和 Python 3.9+，将此分支放在一个日后不会随意移动的目录。在普通 PowerShell 中进入仓库根目录，后续命令均在这里运行。只使用 MathJax 或 Overleaf 云端预览时，不必安装 TeX Live；本机 TeX 放在后面的可选步骤。
+准备 Chrome 145+、Node.js 22+、pnpm 和 Python 3.9+，将源码放在一个日后不会随意移动的目录。在普通 PowerShell 中进入仓库根目录，后续命令均在这里运行。只使用 MathJax 或 Overleaf 云端预览时，不必安装 TeX Live；本机 TeX 放在后面的可选步骤。
 
-本指南随 Windows 开发分支提交；在 PR 合入默认分支之前，需要获取 `windows/install-and-compat-20261106`，而不是旧版 `main` 或 v0.12.14 发布包。已登录有仓库访问权的 GitHub 账号后，可下载该分支源码 ZIP，或使用：
+Windows 支持已合入默认分支。请获取当前版本源码，勿使用不含 Windows helper 的旧 v0.12.14 发布包。可下载同版本源码 ZIP，或使用：
 
 ```powershell
-git clone --branch windows/install-and-compat-20261106 https://github.com/FuXihhy/overleaf-personal-tools.git
+git clone https://github.com/FuXihhy/overleaf-personal-tools.git
 cd overleaf-personal-tools
 ```
 
@@ -19,7 +19,7 @@ cd overleaf-personal-tools
 python -X utf8 scripts/windows-acceptance.py --setup --workspace 'C:\path\to\Overleaf'
 ```
 
-`--setup` 会安装锁定的 JavaScript 依赖、构建 `dist`、注册本机连接、绑定指定 Codex 工作区，再做安装内容和实际后台健康检查。只有额外指定 `--local-tex` 或 `--tex-root` 时，才会在当前 Python 缺少 `pywin32` 时补装它；默认 Codex/API 安装不需要这项 TeX 依赖。默认不配置 TeX 权限，不向模型发送问题，也不加载浏览器扩展；登录、加载扩展和真实问答留给你完成。只使用自己的兼容 API、不使用 Codex 模型时，改用 `python -X utf8 scripts/windows-acceptance.py --setup --api-only`。这一安装路径只注册 API 所需的本机连接，不需要 Codex 程序、登录或工作区，也不修改已有 Codex reader 配置；实际 API 配置和问答按后面的“自备 API”一行完成，不要求 Codex 健康检查通过。
+`--setup` 会安装锁定的 JavaScript 依赖、构建 `dist`、注册本机连接、绑定指定 Codex 工作区，再做安装内容和实际后台健康检查。只有额外指定 `--local-tex` 或 `--tex-root` 时，才会在当前 Python 缺少 `pywin32` 时补装它；默认 Codex/API 安装不需要这项 TeX 依赖。默认不配置 TeX 权限，不向模型发送问题，也不加载浏览器扩展；登录、加载扩展和真实问答留给你完成。只使用自己的兼容 API、不使用 Codex 模型时，改用 `python -X utf8 scripts/windows-acceptance.py --setup --api-only`。这一安装路径注册本机连接并跳过 Codex 设置，不需要 Codex 程序、登录或工作区，也不修改已有 Codex reader 配置；实际 API 配置和问答按后面的“自备 API”一行完成，不要求 Codex 健康检查通过。
 
 自动报告为 `artifacts/windows-acceptance.json`，可上传的合成 Overleaf 项目为 `artifacts/acceptance-project.zip`。终端和报告将自动通过、失败、跳过、待人工检查分别记为 `PASS`、`FAIL`、`SKIP`、`MANUAL`；需要的自动检查失败会返回非零退出码。`PASS` 只表示自动部分通过，仍须完成下面的真实交互。
 
@@ -75,10 +75,10 @@ chapter.tex: OPT-CHAPTER-63B8
 | 桌面双向续聊 | 在网页 Conversation history 对该测试聊天点 Open in Codex，确认首轮回答；在桌面同一聊天发“这是双端验收，请只回答 DESKTOP_ORIGIN_OK”，完成后回到网页 | 网页同一会话出现这条新问题和 `DESKTOP_ORIGIN_OK`。同时检查桌面侧栏实际项目分类；工作目录和 backend 项目 ID 正确，不保证已进入桌面侧栏项目，需要时用 Move / 移动到项目 |
 | 排队与引导 | 生成长回答时排入一条短问题；停止后刷新，查看暂停的队列；手动 Resume queue。需要 Steer 时，在 Codex 回复生成期间发送一次明确引导 | 队列只保留一个待发项，刷新不自动继续，恢复后只发送一次；Steer 的新要求进入正在生成的同一轮。API 连接通常使用排队，不能以排队结果冒充 Steer |
 | 文稿与回答引用 | 选择测试文稿一段后进入聊天，查看引用、Go to source 和移除；选择回答文字，使用 Quote selected text 后再移除 | 引用对象准确，跨焦点保留，定位正确，移除后不再附带 |
-| 公式复制 | 开启 Click formulas to copy LaTeX 及复制提示，在回答公式上点击，再在未发送输入框 Ctrl+V | 实际粘贴出 LaTeX 源码；只看到 Copied 提示还不够。检查后清空输入框，可关闭临时开关 |
+| 公式复制 | 开启 Click formulas to copy LaTeX 及复制提示，在回答公式上点击，再在未发送输入框 Cmd/Ctrl+V | 实际粘贴出 LaTeX 源码；只看到 Copied 提示还不够。检查后清空输入框，可关闭临时开关 |
 | 自备 API | 在 Manage API connections 中自行填写供应商地址、模型和 key，保存后返回选择连接；只使用本测试项目，先用 Normal context 请求短回答与公式，再实际停止一次长回答 | 真实问答完成；停止不自动重发；刷新恢复历史。切回 Codex 时两类历史分离。API 对话不归入 Codex 桌面，模型目录成功不代表问答成功 |
 | 云端 TeX | 在 LaTeX Preview 选择 TeX → Overleaf，按界面创建或关联一个专用预览工作区，检查连接后点合成公式 | 真实 TeX 图片出现；等待编译结果，不把即时 MathJax 草稿当成 TeX 成功。失败时复用同一工作区检查，避免反复创建项目 |
-| 本机 TeX | 按下一节配置，然后选 TeX → Local / 本机并检查连接，再预览合成公式 | 显示 Windows AppContainer + Job Object 沙盒可用，且实际公式编译成功；不能只根据 TeX Live 已安装判断通过 |
+| 本机 TeX | 按下一节配置，然后选 TeX → Local / 本机并检查连接，再预览合成公式 | 显示所用平台的沙盒可用（Windows AppContainer + Job Object／macOS sandbox-exec），且实际公式编译成功；不能只根据 TeX Live 已安装判断通过 |
 | 缓存保留与回收 | Inspect local versions 查看临时版本；切 Keep project locally 后 Sync，确认 retained 增加；切回 On-demand，改动一行合成注释后再 Sync。关闭该项目所有页，保持 Chrome 运行，稍候重开并 Inspect | 有页面时不误删；最后一页离开并经过 30 秒宽限期、后台检查后，临时版本回收而 retained 保留。切换模式本身不会删除已有保留版本 |
 | 显式清理 | 仅在可丢弃的测试项目中先 Inspect，再 Clear retained source，阅读并确认范围；完成后重新 Sync | 缓存归零、聊天历史和 Overleaf 原文件保留；重新同步恢复当前源码。旧版本可能无法从已改变的源码恢复，不能对原稿盲点清理 |
 

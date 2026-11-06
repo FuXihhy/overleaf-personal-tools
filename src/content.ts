@@ -114,11 +114,11 @@ async function start() {
     const count = snapshot.fileCount ?? snapshot.sourceFileCount;
     return count ? codexText(`完整项目已同步：${count} 个源文件，可按需读取全文。`, `Complete project synced: ${count} source files available for reading.`) : codexText('完整项目快照可供读取。', 'The complete project snapshot is available for reading.');
   }
-  async function captureProjectSnapshot(current: () => boolean, background = false): Promise<CodexProjectSnapshot> {
-    try{return await captureProjectSnapshotInner(current,background);}
+  async function captureProjectSnapshot(current: () => boolean, cacheMode: ReturnType<typeof codexCacheMode>, background = false): Promise<CodexProjectSnapshot> {
+    try{return await captureProjectSnapshotInner(current,cacheMode,background);}
     catch(error){if(current())cacheFailure();throw error;}
   }
-  async function captureProjectSnapshotInner(current: () => boolean, background = false): Promise<CodexProjectSnapshot> {
+  async function captureProjectSnapshotInner(current: () => boolean, cacheMode: ReturnType<typeof codexCacheMode>, background = false): Promise<CodexProjectSnapshot> {
     const captureRevision=cacheFreshness.beginSync();
     // Capture only the active buffer. Previously visited files may have newer
     // collaborative edits in the fresh ZIP; stale caches must not replace them.
@@ -136,7 +136,9 @@ async function start() {
       let lease:Awaited<ReturnType<typeof cachePage.acquire>>;
       try{lease=await cachePage.acquire();}catch(error){if(current())codexCatalogue.reportFailure(error);throw error;}
       if(!current())throw new Error(codexText('项目同步已取消。','Project synchronization was cancelled.'));
-      const cacheMode=codexCacheMode(model.codex);
+      // A submitted/queued prompt owns its captured retention setting. Later
+      // autosaves apply to future prompts, including while this lease or a
+      // repair is waiting. Manual sync separately fences mode changes below.
       if(cacheMode==='normal')throw new Error(codexText('普通上下文不下载完整项目。','Normal context does not download the complete project.'));
       const full = await source.captureFull({ liveDocuments: documents, signal: context.signal });
       const result=await syncCodexProjectSource(full, (op, data) => requestCodex(op, op==='source-begin'?{...data,cacheMode,leaseToken:lease.leaseToken}:data), current);
@@ -151,7 +153,7 @@ async function start() {
     finally { if (!background && current()) codexPanel.setStatus(codexSending ? codexText('正在思考…', 'Thinking…') : ''); }
   }
   const sourceGuards = new Set<CodexSourceGuard>();
-  function guardProjectSnapshot(snapshotId:string,current:()=>boolean,failed:(error:Error)=>void) {
+  function guardProjectSnapshot(snapshotId:string,cacheMode:ReturnType<typeof codexCacheMode>,current:()=>boolean,failed:(error:Error)=>void) {
     const guard=new CodexSourceGuard({current,failed,
       check:async()=>{
         let unavailable=false;
@@ -161,7 +163,7 @@ async function start() {
           return true;
         }catch(error){if(current())cacheFailure();if(unavailable)return false;throw error;}
       },
-      repair:()=>captureProjectSnapshot(current,true),
+      repair:()=>captureProjectSnapshot(current,cacheMode,true),
     });
     return guard;
   }
@@ -216,7 +218,7 @@ async function start() {
     async onSyncProjectCache() {
       if(!context.alive() || !codexReady || !model.codex?.enabled || model.codex.contextMode!=='project')throw new Error(codexText('请先启用完整项目上下文。','Enable complete project context first.'));
       const generation=codexGeneration,mode=codexCacheMode(model.codex);
-      const result=await captureProjectSnapshot(()=>context.alive() && generation===codexGeneration && !!model.codex?.enabled && mode===codexCacheMode(model.codex),true);
+      const result=await captureProjectSnapshot(()=>context.alive() && generation===codexGeneration && !!model.codex?.enabled && mode===codexCacheMode(model.codex),mode,true);
       const changed=result.uploadedFileCount??result.fileCount;
       return codexText(`项目缓存已同步：${result.fileCount} 个文件，上传 ${changed} 个，其余复用本机缓存。`,`Project cache synced: ${result.fileCount} files; ${changed} uploaded, the rest reused locally.`);
     },
@@ -524,11 +526,11 @@ async function start() {
         let note = '', snapshotId: string | undefined;
         if(prepared){files=prepared.files;snapshotId=prepared.snapshotId;note=prepared.note;}
         else if (settings.contextMode === 'project') {
-          const result = await captureProjectSnapshot(() => context.alive() && generation === codexGeneration && !codexCancelled);
+          const result = await captureProjectSnapshot(() => context.alive() && generation === codexGeneration && !codexCancelled,codexCacheMode(settings));
           snapshotId = result.snapshotId; note = snapshotNote(result);
         }
         if(snapshotId){
-          const guard=guardProjectSnapshot(snapshotId,()=>context.alive() && generation===codexGeneration && !codexCancelled,error=>{
+          const guard=guardProjectSnapshot(snapshotId,codexCacheMode(settings),()=>context.alive() && generation===codexGeneration && !codexCancelled,error=>{
             cacheFailure();
             sourceRecoveryWarning=codexText('项目缓存恢复未完成：','Project cache recovery did not complete: ')+codexError(error);
             codexPanel.setStatus(sourceRecoveryWarning);
@@ -598,7 +600,7 @@ async function start() {
     const generation=codexGeneration, settings={...model.codex},providerId=provider();
     const prompt:CapturedPrompt={question,settings,providerId,conversationId:activeConversationId,selection:selection?{...selection}:undefined,answerQuote:answerQuote?{...answerQuote}:undefined,files:[],note:''};
     if(settings.contextMode==='project'){
-      const result=await captureProjectSnapshot(()=>context.alive() && !!model.codex?.enabled && generation===codexGeneration && providerId===provider());
+      const result=await captureProjectSnapshot(()=>context.alive() && !!model.codex?.enabled && generation===codexGeneration && providerId===provider(),codexCacheMode(settings));
       prompt.snapshotId=result.snapshotId;prompt.sourceFileCount=result.fileCount;prompt.sourceTotalBytes=result.totalBytes;prompt.note=snapshotNote(result);
     }
     if(!context.alive() || !model.codex?.enabled || generation!==codexGeneration || providerId!==provider())throw new Error(codexText('对话已改变，问题尚未加入队列。','The conversation changed. The question has not been queued.'));
@@ -626,7 +628,7 @@ async function start() {
       if(prompt.providerId!==provider() || prompt.conversationId!==conversationId)throw new Error(codexText('排队消息属于其他对话，请检查后再发送。','The queued message belongs to another conversation. Review it before sending.'));
       if(prompt.snapshotId){
         const generation=codexGeneration;
-        sourceGuard=guardProjectSnapshot(prompt.snapshotId,()=>context.alive() && codexSending && generation===codexGeneration && !codexCancelled,error=>{
+        sourceGuard=guardProjectSnapshot(prompt.snapshotId,codexCacheMode(prompt.settings),()=>context.alive() && codexSending && generation===codexGeneration && !codexCancelled,error=>{
           cacheFailure();
           sourceRecoveryWarning=codexText('引导消息的项目缓存恢复未完成：','The steering message cache could not be restored: ')+codexError(error);
           codexPanel.setStatus(sourceRecoveryWarning);

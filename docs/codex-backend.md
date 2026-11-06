@@ -11,102 +11,80 @@ Chat Completions connections. Their requests use the supplied API address and
 key through the same helper. Neither mode starts a localhost HTTP listener or
 uses an extension-publisher service.
 
-## Install on this Mac
+## Current installation and update behavior
 
-Inspect the registration without writing files:
+The helper supports macOS and Windows with Python 3.9+. Start with the
+[cross-platform installation guide](installation.md); the protocol and historical
+acceptance sections below describe implementation details, not a substitute for
+current-version acceptance.
 
-```sh
-/usr/bin/python3 native/install_codex.py
-```
-
-Register or update the Codex helper for the stable extension ID, assigning new
-conversations to an existing Codex project:
+On macOS, install or update the Codex helper from the source root:
 
 ```sh
-/usr/bin/python3 native/install_codex.py --install --workspace /absolute/path/to/Overleaf
+/usr/bin/python3 native/install_codex.py --install
 ```
 
-`--workspace` resolves an existing app-server project by exact root path and
-project name. It reads `project/list` without creating a project, thread or model
-turn. An ambiguous or missing match is an error. Alternatively add
-`--project-id <backend-project-id>` using the ID returned by app-server, which
-can differ from the desktop tool's project ID. The workspace must already exist.
+For a first installation that should bind new chats to an existing local Codex
+project, add `--workspace /absolute/path/to/Overleaf`. The directory must already
+exist and be registered as a Codex project. The installer resolves a unique
+app-server project by exact root path and name without creating a project,
+thread or model turn. An explicit `--project-id` must be a verified backend ID,
+which can differ from a Desktop UI ID. A plain update preserves an existing
+workspace configuration; with no configuration, new chats use the helper's
+private working directory. Backend binding and Desktop sidebar classification
+are separate: use Desktop Move and verify the sidebar when necessary.
 
-A plain `--install` preserves an earlier workspace configuration. With no
-configuration, the helper keeps its original private working directory. The
-optional `workspace.json` is private local configuration (mode `0600`), never a
-browser-provided path. New `thread/start` requests explicitly carry its `cwd`
-and backend `projectId`; `thread/resume` uses its `cwd`. Project-source context
-comes from the browser. The private app-server disables project-file discovery;
-the Desktop route has the separate permission boundary described below.
-
-The installer copies five Python files—`codex_host.py` and its four companions
-`desktop_ipc.py`, `desktop_state.py`, `api_provider.py`, `prompt_display.py`—plus a fixed
-Python launcher, its own ownership marker, and optional workspace configuration into
-`~/Library/Application Support/OverleafPersonalTools/codex-native-host/`.
-It registers a Chrome Native Messaging manifest allowing exactly the extension
-ID derived from this repository's public key. It does not change the TeX host,
-global Codex configuration, account login, or Overleaf source files. Reload the extension and
-refresh the Overleaf editor after a browser-side update. Re-run the installer
-when the Python helper changes.
-
-Version 0.9.4 adds the Desktop-owner adapter alongside the existing private
-app-server client. To update an
-existing installation, run `/usr/bin/python3 native/install_codex.py --install`
-without `--workspace`; this preserves its existing workspace configuration.
-Reload the extension and refresh the editor to start a connection using the
-updated helper. Codex Desktop does not need to restart or release its conversation.
-The browser/native protocol remains version 1. The adapter modules must be
-updated together with the host; the installer rejects a production host whose
-companion modules are missing. Assistant-answer quotations introduced in 0.9.3
-remain supported.
-
-Version 0.10.0 adds `api_provider.py`; re-run the same installer, reload the
-extension and refresh Overleaf to update both sides. Existing Codex history and
-workspace configuration are retained. The browser/native protocol remains
-version 1, with optional provider routing and separately admitted management
-operations. A plain installation also supports API-only use without Codex login;
-`--workspace` and project lookup remain Codex-specific.
-
-Version 0.11.2 updates both the browser and the native helper: refresh the
-installation for account-transition handling and supported reply steering, then
-preserve any composer draft, reload the extension and refresh Overleaf. The
-new queue, compact user-message display and formula-copy notice need the new
-browser build; installing only the helper does not enable those controls.
-`prompt_display.py` must be installed with the other companion modules. The protocol remains version 1 with
-additional validated operations and capability fields.
-
-The helper supports macOS and Python 3.9+. For the default source, it discovers Codex in the known
-ChatGPT/Codex application bundles or `/opt/homebrew/bin/codex` and
-`/usr/local/bin/codex`. Browser messages cannot choose a command or executable.
-Open the local Codex app and sign in normally, then open
-Settings → Extension → Codex Assistant. Opening this settings page automatically
-checks the connection and loads the available model catalogue. Authentication
-remains owned by Codex.
-A disconnected or signed-out backend is shown explicitly; the helper never
-requests a password or exposes account email, login tokens, or raw auth data.
-
-Unregister only the dedicated helper:
+For API-only use without Codex installed or signed in:
 
 ```sh
-/usr/bin/python3 native/install_codex.py --uninstall
+/usr/bin/python3 native/install_codex.py --install --api-only
 ```
 
-Uninstall keeps Codex conversations, the assistant's private history databases
-and saved API connections. It
-refuses to delete an unmarked directory or conflicting registration.
+This skips Codex discovery and MCP registration. It cannot be combined with
+workspace/project binding. To enable Codex later, run the ordinary installer.
+Windows users can use `python -X utf8 scripts/windows-acceptance.py --setup`
+with their workspace or `--api-only`, as described in the installation guide.
 
-## Optional API connections (0.10.0)
+The installer copies `codex_host.py` and all required companions, including
+Desktop adapters, API provider, context transport/store, manuscript reader,
+platform utilities and cache lifecycle modules. A fixed launcher, ownership
+marker and optional workspace configuration live in the dedicated
+`codex-native-host/` directory. The Chrome Native Messaging registration allows
+only the ID derived from this repository's public manifest key. macOS uses
+`/usr/bin/python3`; Windows records the installation Python's absolute path.
+
+**Ordinary Codex installation registers or verifies the exact `overleaf_project`
+MCP entry in Codex configuration.** Other MCP entries and account credentials
+are preserved. Reader dependency changes update a registration marker; an
+already-running Desktop must be normally exited and reopened to load the new
+reader. Reconnecting a separate private app-server cannot refresh that Desktop
+process. API-only installation does not alter the MCP entry. Neither path
+changes TeX host registration or Overleaf source files.
+
+Re-run the installer when native code changes, reload the extension, and refresh
+open Overleaf pages. The browser/native protocol remains version 1 with
+validated operation-specific fields. On macOS, Codex is discovered in known
+application bundles and standard CLI installation paths; Windows uses its
+platform-specific discovery. A browser message cannot select the executable.
+
+Without an action flag, the installer only prints its registration plan.
+`--uninstall` removes the owned helper and matching reader registration while
+preserving separately stored history, API connections and source caches.
+`--uninstall --api-only` skips Codex calls for a pure API installation, but refuses
+when an owned reader marker would otherwise be orphaned. Conflicting or unmarked
+installations are not overwritten or removed.
+
+## Optional API connections
 
 In Overleaf, open **Settings → Extension → Codex Assistant → Manage API
 connections**. The extension-owned `api-settings.html` page can add multiple
 named connections, with an API base URL, model ID and password-type API-key
 field. A DeepSeek preset supplies an address and model; the user supplies their
 own key. Save the connection, return to Overleaf, refresh the connections list,
-select it under **Model source**, and save the project settings. Codex remains
+select it under **Model source**. Project settings save automatically. Codex remains
 the default when no `providerId` is set. The source selection is scoped to the
 Overleaf account and project, while saved connection profiles belong to this
-Mac's helper installation.
+device's helper installation.
 
 Credential entry is restricted to the extension page. Its `opt:api-settings`
 port admits only the exact extension-owned page and supports `provider-list`,
@@ -120,8 +98,7 @@ Chrome storage or Overleaf DOM.
 
 The native store is
 `~/Library/Application Support/OverleafPersonalTools/codex-assistant/api-connections/profiles.json`.
-Its directory is mode `0700` and file mode `0600`; this is a private local JSON
-file, **not macOS Keychain storage or application-level encryption**. The helper
+On macOS its directory is mode `0700` and file mode `0600`; Windows uses the product root under `%USERPROFILE%\.overleaf-personal-tools` and protected current-user/SYSTEM ACLs. This is a private local JSON file, **not an OS credential vault or application-level encryption**. The helper
 checks ownership, rejects symlink storage, serializes mutations and writes
 atomically. Up to 24 profiles are supported. Changing an existing profile's
 base URL is rejected: create a new connection for another destination so old
@@ -179,7 +156,7 @@ The current implementation is read-only manuscript discussion. Selected text
 is the snapshot captured by the editor and may be newer than the project ZIP;
 it takes priority over project-file context. Files are quoted data, and source
 comments cannot authorize tools or actions. Project-specific writing preferences
-are supplied separately. Source files are not written to the helper's workspace.
+are supplied separately. Complete source snapshots are written to a separate private project-context store, not to the user-selected Codex workspace. Retained mode also publishes read-only versioned mirrors; see the current cache lifecycle section below.
 
 For the default Codex source, the Overleaf account ID and project ID jointly
 define the history scope. Their
@@ -312,7 +289,7 @@ shows its full preserved text, and current context budgets remain unchanged.
 ## Captured follow-up queue and steering (0.11.0)
 
 While a reply is running, Queue stores a follow-up with its question, manuscript
-selection, answer quote, bounded project files, settings and provider/conversation
+selection, answer quote, a complete project snapshot reference where selected, settings and provider/conversation
 identity captured at that moment. It does not replace or stop the active answer.
 The page sends queued entries FIFO after the current turn completes. Since 0.11.2,
 Messages while working chooses queue (default) or steer. The ordinary Send
@@ -324,8 +301,7 @@ The browser queue admits at most eight items within a 1 MiB serialized JSON
 budget. With an identified Overleaf account it is stored in `chrome.storage.local`
 under the account/project queue key; each item remains fenced to its provider
 and conversation. Unknown accounts keep the queue only in page memory. This is
-separate from native history and is a new persistent copy of bounded manuscript
-context. Later document edits do not rewrite an already queued item. A queue
+separate from native history and retains bounded quotation/context data and source snapshot references. Legacy entries may contain bounded file text. Later document edits do not rewrite an already queued item. A queue
 must be processed or cleared before changing model source, starting a new chat
 or switching history. Editing an unsent item restores its question and quotes
 only when the composer is empty; its next explicit submission recaptures context.
@@ -388,7 +364,7 @@ keeps the writer and starts the turn in the same conversation; the helper remain
 a reader and follower. It rechecks persisted history after finding the owner,
 and Desktop rejects context injection if another turn becomes active. Finishing
 a Desktop answer is sufficient to continue from Overleaf when this adapter is
-supported: no manual release, inactivity timeout or Desktop restart is needed.
+supported: no manual release or inactivity timeout is needed once the Desktop has loaded the current reader; reader installation or update still requires a normal Desktop restart.
 A turn still running in either client must finish or be stopped before another
 contextual question can start. The native bridge does not queue a conflicting question; the 0.11.0 browser queue keeps it unsent until the current round has finished.
 
@@ -669,7 +645,7 @@ reported “Connected to local Codex” and listed eight models plus Follow Code
 without pressing Check connection. Temporarily selecting `gpt-6.1-sol` in the
 unsaved draft showed Default, Low, Medium, High, Extra high, Maximum and Ultra;
 the draft was then returned to its original Follow Codex value without saving.
-This is a current real browser-to-native model-list check. No new inference
+This was a 0.8.2 real browser-to-native model-list check. No new inference
 request was sent in this live check, and the existing conversation was neither
 reset nor replaced. Earlier real inference evidence above remains historical.
 The [live-page record](../dev/README.md#082-live-overleaf-check) also distinguishes
@@ -884,3 +860,33 @@ Validated with 131,412 bytes across four synthetic TeX files: actual DeepSeek re
 API project-context settings expose optional integer fields `apiMaxReadRounds` (1–256, default 64), `apiMaxToolCalls` (1–512, default 128), and `apiTimeoutSeconds` (90–580, default 580). Missing fields retain the defaults; explicit invalid values are rejected at transport/native boundaries. Only API requests with matching provider identities can carry these overrides. The frontend saves committed valid numbers on blur, preserves invalid drafts without persisting them, and explains that higher limits may increase API requests, token usage, costs and latency. Settings are captured with each request, including queued requests; changing them does not alter an active reply. The existing final-answer pass, 60-second reserve, duplicate detection and input-size limits still apply.
 
 These overrides apply only when reading a project snapshot. Selection-only replies keep the existing 580-second deadline even if the project retains a shorter reading budget for future project-context messages. Locale changes preserve unfinished numeric drafts and validation messages without saving them prematurely.
+
+
+## Current source lifecycle and shared fixes
+
+Project settings expose Normal context, On-demand cache (default), and Keep
+project locally. Normal uses selection/nearby text without a complete-project
+capture. On-demand creates temporary snapshots on demand. Keep locally retains
+versions and a read-only mirror preserving project-relative text paths. Changing
+modes does not delete legacy or retained versions, chat history, or API profiles.
+
+A persisted Chrome page inventory and trusted document identities protect open
+projects. Cache cleanup follows verified final-page departure, a 30-second grace
+period, and release of queued/active/uncertain request pins. Service-worker sleep,
+a lost port, or an incomplete inventory is not proof that a page departed.
+Cleanup depends on later Chrome execution and reachable native hosts. Explicit
+source clearing checks the displayed revision, ownership and active work; it
+does not delete Overleaf originals or conversation history.
+
+Retained mirrors reject platform filename collisions rather than silently
+renaming source. macOS also checks case and Unicode-equivalent component aliases
+that cannot be faithfully represented on the destination filesystem. Mirrors
+are not editable sync folders; unexpected edits stop replacement.
+
+The shared 0.12.16–0.12.17 fixes accept browser-owned bounded opaque document IDs,
+separate backend/reader/source status, preserve interrupted partial answers when
+canonical history lacks a final answer, and prevent stale preview errors/drafts
+from replacing newer results. The 0.12.18 Mac work adds native filename collision
+coverage and API-only installation. See [cross-platform fix mapping](cross-platform-fixes-0.12.17.md), [user data controls](privacy.md), and the relevant
+release acceptance record. Historical test counts above retain their original
+version and device scope.

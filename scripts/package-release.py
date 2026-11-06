@@ -8,6 +8,17 @@ import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
+LICENSE_FILES = {
+    'LICENSE', 'THIRD_PARTY_NOTICES.md',
+    'licenses/MathJax-LICENSE.txt', 'licenses/MathJax-NOTICE.txt',
+    'licenses/fflate-LICENSE.txt', 'licenses/socket.io-client-LICENSE.txt',
+    'licenses/PDFjs-LICENSE.txt', 'licenses/PDFjs-SOURCE-NOTICES.txt',
+    'licenses/Brotli-LICENSE.txt', 'licenses/PDFjs-LICENSE_FOXIT.txt',
+    'licenses/PDFjs-LICENSE_LIBERATION.txt', 'licenses/PDFjs-LICENSE_QCMS.txt',
+    'licenses/PDFjs-LICENSE_PDFJS_QCMS.txt', 'licenses/PDFjs-LICENSE_OPENJPEG.txt',
+    'licenses/PDFjs-LICENSE_PDFJS_OPENJPEG.txt', 'licenses/PDFjs-LICENSE_JBIG2.txt',
+    'licenses/PDFjs-LICENSE_PDFJS_JBIG2.txt',
+}
 
 
 def archive(destination, entries):
@@ -32,8 +43,9 @@ def main():
         ['git', 'ls-files', '--cached', '--others', '--exclude-standard', '-z'], cwd=ROOT
     ).decode().split('\0')
     # Explicit roots keep unrelated local additions out of release artifacts.
-    roots = {'src', 'native', 'tests', 'scripts', 'dev', 'assets', 'docs'}
-    top = {'.gitignore', 'README.md', 'CHANGELOG.md', 'CHROMEWEBSTORE.md',
+    roots = {'src', 'native', 'tests', 'scripts', 'dev', 'assets', 'docs', 'acceptance', 'licenses'}
+    top = {'.gitignore', '.gitattributes', 'README.md', 'CHANGELOG.md', 'CHROMEWEBSTORE.md',
+           'LICENSE', 'THIRD_PARTY_NOTICES.md', 'vitest.config.ts',
            'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'tsconfig.json',
            'manifest.json', 'api-settings.html', 'api-settings.css', 'dev.sh'}
     source_entries = []
@@ -50,7 +62,11 @@ def main():
     names = {name.split('/', 1)[1] for _, name in source_entries}
     required = {'src/content.ts', 'src/preview/render.ts', 'src/codex/panel.ts',
                 'native/host.py', 'native/codex_host.py', 'native/install.py',
-                'native/install_codex.py', 'pnpm-lock.yaml', 'docs/windows.md'}
+                'native/install_codex.py', 'native/platform_utils.py', 'native/cache_lifecycle.py',
+                'pnpm-lock.yaml', 'vitest.config.ts', '.gitattributes', 'docs/installation.md',
+                'docs/windows.md', 'acceptance/README.md', 'acceptance/project/main.tex',
+                'acceptance/project/chapter.tex', 'scripts/windows-acceptance.py'}
+    required |= LICENSE_FILES
     if not required.issubset(names):
         raise ValueError('Source archive is missing required components: ' + str(required - names))
     output = ROOT / 'artifacts' / ('release-' + version)
@@ -59,6 +75,17 @@ def main():
     source = output / f'overleaf-personal-tools-{version}-source.zip'
     browser_entries = [(path, path.relative_to(ROOT / 'dist').as_posix())
                        for path in sorted((ROOT / 'dist').rglob('*')) if path.is_file()]
+    browser_required = LICENSE_FILES | {
+        'manifest.json', 'THIRD_PARTY_NOTICES.txt',
+        'pdf-standard-fonts/LICENSE_FOXIT', 'pdf-standard-fonts/LICENSE_LIBERATION',
+    }
+    browser_names = {name for _, name in browser_entries}
+    if not browser_required.issubset(browser_names):
+        raise ValueError('Extension archive is missing required notices or components: '
+                         + str(browser_required - browser_names))
+    for name in LICENSE_FILES:
+        if (ROOT / name).read_bytes() != (ROOT / 'dist' / name).read_bytes():
+            raise ValueError('Rebuild the extension after updating license/notice file: ' + name)
     archive(browser, browser_entries)
     archive(source, source_entries)
     checksums = ''.join(hashlib.sha256(path.read_bytes()).hexdigest() + '  ' + path.name + '\n'

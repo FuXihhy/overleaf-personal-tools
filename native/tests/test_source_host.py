@@ -26,7 +26,7 @@ class SourceHostTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.output = io.BytesIO()
-        self.host = host.NativeHost(self.output, store=host.SessionStore(Path(self.directory.name)))
+        self.host = host.NativeHost(self.output, store=host.SessionStore(Path(self.directory.name).resolve()))
 
     def tearDown(self):
         self.host.close()

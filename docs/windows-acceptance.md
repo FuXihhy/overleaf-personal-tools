@@ -1,14 +1,16 @@
 # Windows 开发版验收记录
 
+公开版本已省略本机名称、用户路径及测试会话标识；版本、检查结果与证据边界保留。
+
 以下记录对应 0.12.15。后续真实页面反馈发现连接提示与页面身份格式的遗漏，0.12.16 修复及交互验收进展见 [连接修复记录](windows-connection-acceptance.md)；不能把此处旧版基础连通确认解释为完整交互通过。
 
-验证日期：2026-11-06。当前设备 `FUXI-LENOVO`，工作目录 `E:\Learning\Code\Overleaf\overleaf-personal-tools`，分支 `windows/install-and-compat-20261106`。用户已确认在这台设备继续。基线是私有仓库 v0.12.14、提交 `0803251324c32a2f213f39a4ece7ddac264ab126`；本地源码构建为 `0.12.15 Windows development`，固定扩展 ID 为 `pffppbkokpnfafpechmlambifflkmbbn`。没有用发布 ZIP 安装，因此不声称验证过发布 ZIP 的哈希。
+验证日期：2026-11-06。当前设备 `<redacted-device-name>`，工作目录 `<redacted-checkout-path>`，分支 `windows/install-and-compat-20261106`。用户已确认在这台设备继续。基线是私有仓库 v0.12.14、提交 `0803251324c32a2f213f39a4ece7ddac264ab126`；本地源码构建为 `0.12.15 Windows development`，固定扩展 ID 为 `pffppbkokpnfafpechmlambifflkmbbn`。没有用发布 ZIP 安装，因此不声称验证过发布 ZIP 的哈希。
 
 ## 环境与安装
 
-Windows 10.0.26200；Chrome 156.0.8078.81；Git 2.55.0.windows.3；Node 24.19.0；pnpm 12.16.1；Python 3.11.5（`D:\anaconda3\python.exe`）；TeX Live 2024（`D:\texlive\2024`）。系统 Codex CLI 为 0.166.0，已使用本机 ChatGPT 登录；桌面包为 `OpenAI.Codex_26.1027.3384.0_x64__2p2nqsd0c76g0`，内置 native CLI 0.166.0-alpha.5.1。
+Windows 10.0.26200；Chrome 156.0.8078.81；Git 2.55.0.windows.3；Node 24.19.0；pnpm 12.16.1；Python 3.11.5（安装路径已省略）；TeX Live 2024（安装路径已省略）。系统 Codex CLI 为 0.166.0，已使用本机 ChatGPT 登录；桌面包为 `OpenAI.Codex_26.1027.3384.0_x64__2p2nqsd0c76g0`，内置 native CLI 0.166.0-alpha.5.1。
 
-两个 helper 安装在 `C:\Users\Lenovo\.overleaf-personal-tools` 下，避免 MSIX 对 LocalAppData 的文件重定向。Chrome HKCU NativeMessagingHosts 注册到此处的 manifest，两个 `allowed_origins` 均为固定扩展 ID。旧试装文件保留；只修复明确属于本产品的旧注册值。没有复制 Mac 凭据、历史或稿件缓存。
+两个 helper 安装在 `%USERPROFILE%\.overleaf-personal-tools` 下，避免 MSIX 对 LocalAppData 的文件重定向。Chrome HKCU NativeMessagingHosts 注册到此处的 manifest，两个 `allowed_origins` 均为固定扩展 ID。旧试装文件保留；只修复明确属于本产品的旧注册值。没有复制 Mac 凭据、历史或稿件缓存。
 
 用户已手动加载 `dist`，在真实 Overleaf 页面确认 LaTeX Preview / Codex Assistant 两个入口；随后报告“codex连接成功，tex显示 Windows AppContainer + Job Object 沙盒可用”。最终更新后，用户再次重新加载 `0.12.15 Windows development` 并刷新专用测试项目，确认“已重新加载，三种模式和两项连接都正常”。因此最终版本的安装、三模式设置入口和两项连接已获得真实页面用户确认；下面明确区分尚未执行的完整交互验收。
 

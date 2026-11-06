@@ -40,7 +40,7 @@ class ConnectionStatusTests(unittest.TestCase):
             self.servers.append(value)
             self.deadlines.append(kwargs.get('deadline'))
             return value
-        self.native = host.NativeHost(io.BytesIO(), host.SessionStore(Path(self.temp.name)/'state'), factory)
+        self.native = host.NativeHost(io.BytesIO(), host.SessionStore(Path(self.temp.name).resolve()/'state'), factory)
 
     def tearDown(self):
         self.native.close()

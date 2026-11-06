@@ -21,7 +21,7 @@ def history(op='history-read', **fields):
 class HistoryStoreTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.store = host.SessionStore(Path(self.temp.name) / 'state')
+        self.store = host.SessionStore(Path(self.temp.name).resolve() / 'state')
     def tearDown(self): self.temp.cleanup()
 
     def test_migrates_registered_pointer_and_new_chat_keeps_catalog(self):
@@ -114,7 +114,7 @@ class HistoryStoreTests(unittest.TestCase):
             with self.assertRaises(host.HostError): self.store.page(dict(request(), cursor=invalid), THREAD)
 
     def test_database_symlinks_are_not_followed(self):
-        target = Path(self.temp.name) / 'unrelated'; target.write_text('unchanged')
+        target = Path(self.temp.name).resolve() / 'unrelated'; target.write_text('unchanged')
         try:
             (self.store.root / 'history.sqlite3').symlink_to(target)
         except OSError as error:
@@ -150,8 +150,8 @@ class HistoryHostTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(); self.messages = Messages()
         self.patch = mock.patch.object(host, 'write_message', self.messages.add); self.patch.start()
-        self.server = HistoryServer(Path(self.temp.name))
-        self.native = host.NativeHost(io.BytesIO(), host.SessionStore(Path(self.temp.name)/'state'), lambda cwd, **kwargs: self.server)
+        self.server = HistoryServer(Path(self.temp.name).resolve())
+        self.native = host.NativeHost(io.BytesIO(), host.SessionStore(Path(self.temp.name).resolve()/'state'), lambda cwd, **kwargs: self.server)
     def tearDown(self): self.native.close(); self.patch.stop(); self.temp.cleanup()
 
     def test_history_request_validation(self):
@@ -281,7 +281,7 @@ class HistoryHostTests(unittest.TestCase):
 
         root = self.native.store.root
         self.native.close()
-        self.server = HistoryServer(Path(self.temp.name))
+        self.server = HistoryServer(Path(self.temp.name).resolve())
         self.server.pages = [canonical]
         self.native = host.NativeHost(io.BytesIO(), host.SessionStore(root), lambda cwd, **kwargs: self.server)
         self.native.handle(history(id='after-restart'))
@@ -348,7 +348,7 @@ class HistoryHostTests(unittest.TestCase):
         self.native.store.write(request(), THREAD)
         self.native.store.record(request(), THREAD, 'earlier:user', 'user', 'Earlier question')
         self.server.finish = False
-        other_server = HistoryServer(Path(self.temp.name))
+        other_server = HistoryServer(Path(self.temp.name).resolve())
         other = host.NativeHost(io.BytesIO(), host.SessionStore(self.native.store.root), lambda cwd, **kwargs: other_server)
         try:
             self.native.handle(request()); self.messages.wait('delta')
@@ -420,7 +420,7 @@ class HistoryHostTests(unittest.TestCase):
 class WorkspaceTests(unittest.TestCase):
     def test_workspace_configuration_rejects_external_paths_and_invalid_shape(self):
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary); config = root/'workspace.json'
+            root = Path(temporary).resolve(); config = root/'workspace.json'
             self.assertEqual(host.workspace_configuration(root, config), (root, None))
             for value in ({'workspace': 'relative'}, {'workspace': str(root/'missing')},
                           {'workspace': str(root), 'projectId': 'bad'}, {'workspace': str(root), 'command': 'bad'}):
@@ -428,7 +428,7 @@ class WorkspaceTests(unittest.TestCase):
                 with self.assertRaises(host.HostError): host.workspace_configuration(root, config)
     def test_workspace_configuration_rejects_symlink(self):
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary); config = root/'workspace.json'
+            root = Path(temporary).resolve(); config = root/'workspace.json'
             target = root/'other'; target.write_text('{}')
             try:
                 config.symlink_to(target)
@@ -440,7 +440,7 @@ class WorkspaceTests(unittest.TestCase):
 
     def test_start_and_resume_use_configured_workspace_but_private_history_root(self):
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary); workspace = root/'Overleaf'; workspace.mkdir()
+            root = Path(temporary).resolve(); workspace = root/'Overleaf'; workspace.mkdir()
             config = root/'workspace.json'; config.write_text(json.dumps({'workspace': str(workspace), 'projectId': OTHER}))
             store = host.SessionStore(root/'private-history'); server = FakeServer(workspace); messages = Messages()
             factory = mock.Mock(return_value=server)
@@ -462,7 +462,7 @@ class WorkspaceTests(unittest.TestCase):
 
     def test_installer_preserves_explicit_workspace_across_updates(self):
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary); workspace = root/'Overleaf'; workspace.mkdir()
+            root = Path(temporary).resolve(); workspace = root/'Overleaf'; workspace.mkdir()
             source = ROOT/'native/codex_host.py'
             directory, _ = installer.install('a'*32, source, root, workspace, OTHER)
             path = directory/'workspace.json'; original = path.read_text()

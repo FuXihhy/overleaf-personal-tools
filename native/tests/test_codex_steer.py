@@ -32,7 +32,7 @@ class SteeringTests(unittest.TestCase):
         self.servers = []
         def server(cwd, **kwargs):
             result = SteerServer(cwd); self.servers.append(result); return result
-        self.store = host.SessionStore(Path(self.temp.name) / 'state')
+        self.store = host.SessionStore(Path(self.temp.name).resolve() / 'state')
         self.native = host.NativeHost(io.BytesIO(), self.store, server)
     def tearDown(self):
         self.native.close(); self.patch.stop(); self.temp.cleanup()

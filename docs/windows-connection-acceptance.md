@@ -2,6 +2,8 @@
 
 可在 GitHub 直接查看的合成项目截图与结构化摘要已整理到[本轮验收证据](../acceptance/evidence/2026-11-06/README.md)。其他用户重新安装时应使用[安装与验收指南](../acceptance/README.md)，不要把下面的维护者实测结果当作自己机器已通过。
 
+公开版本已用明确占位符替换本机路径与合成项目、聊天、轮次、快照的标识；这不改变以下历史验证结论，也不表示 Git 历史已清除这些旧标识。
+
 日期：2026-11-06；设备与安装目录延续 [Windows 安装说明](windows-development.md)。用户报告关闭本地 Codex 后仍显示 Connected，发送时却出现 `A verified Chrome project document is required for project caching`。本次先修复这两个问题，再继续真实页面验收；不把自动化测试等同于实际页面完成。
 
 ## 根因与修复
@@ -20,17 +22,17 @@
 
 已重装 Codex native `0.12.16`，并通过真实安装启动器读到 `available=true`、`authenticated=true`、8 个模型、`connectionKind=standalone`、`projectReaderReady=true`，退出码 0。该结果不包含模型推理或桌面握手。TeX 代码本轮未改，Windows TeX 专用测试仍在上述完整回归中执行通过。日志位于工作目录 `windows-frontend-0.12.16.log`、`windows-native-0.12.16.log`。
 
-本轮通过 Chrome Browser API 创建专用 [OPT Windows Acceptance 2026-11-06](https://www.overleaf.com/project/6aed6fe1c7faaec064ddfb2a)，只写入合成 `main.tex`、`chapter.tex`。其中两个哨兵为 `OPT-MAIN-7A91` 与 `OPT-CHAPTER-63B8`，用于后续跨文件读取验证。在旧版真实页面点击 Sync project cache，确切复现相同的 Chrome document 校验错误；同时模型列表成功载入。合成项目也成功执行过 Overleaf 常规云端编译。未改动原稿项目，未在此项目发送模型问题。
+本轮通过 Chrome Browser API 创建专用 **OPT Windows Acceptance 2026-11-06**（项目 ID 已省略），只写入合成 `main.tex`、`chapter.tex`。其中两个哨兵为 `OPT-MAIN-7A91` 与 `OPT-CHAPTER-63B8`，用于后续跨文件读取验证。在旧版真实页面点击 Sync project cache，确切复现相同的 Chrome document 校验错误；同时模型列表成功载入。合成项目也成功执行过 Overleaf 常规云端编译。未改动原稿项目，未在此项目发送模型问题。
 
 ## 真实 Chrome 验收进展
 
-用户重新加载后，真实页面的 Sync project cache 成功：2 文件，重复同步复用本机正文。面板显示 `Codex · Local service checked`，设置明确说明尚未验证模型推理。专用聊天 `01a1af98-46fd-7781-82bd-3af7c7fceef0` 首轮使用 `gpt-6-luna / low`，问题没有泄露哨兵值，准确回答 `main.tex: OPT-MAIN-7A91` 与 `chapter.tex: OPT-CHAPTER-63B8`。对此准确 ID 的只读 canonical 审计证明，两次 `overleaf_project/read_project_file` 分别读取两文件并完成，没有工具错误。刷新后同会话问答恢复。
+用户重新加载后，真实页面的 Sync project cache 成功：2 文件，重复同步复用本机正文。面板显示 `Codex · Local service checked`，设置明确说明尚未验证模型推理。专用聊天 `<synthetic-conversation-A>` 首轮使用 `gpt-6-luna / low`，问题没有泄露哨兵值，准确回答 `main.tex: OPT-MAIN-7A91` 与 `chapter.tex: OPT-CHAPTER-63B8`。对此准确 ID 的只读 canonical 审计证明，两次 `overleaf_project/read_project_file` 分别读取两文件并完成，没有工具错误。刷新后同会话问答恢复。
 
 第二轮实际出现连续流式输出及公式渲染。只排入一条追问，向上滚动后出现 Jump to latest；Stop 最终显示 Stopped，canonical 状态为 interrupted。队列保持一条暂停项，刷新后仍保留；手动 Resume queue 后只提交一次，第三轮返回 `QUEUE_OK-7A91`，队列清空。源文选区跨焦点保留、Go to source 和移除，回答文字的 Quote selected text、定位和移除，以及面板左右切换均实际操作。用户分别确认 Desktop 能看到首轮两行回答和第二轮问题；这不能证明 Desktop 实时回答、生成指示或 writer 交接，精确 ID 的只读 discover_owner 当时仍无 owner。
 
 MathJax 自定义 `\cN` 浮窗、Code 模式的 Gaussian 积分/physics 偏导本机 TeX 浮窗，以及 Visual 点入自定义宏后的本机 TeX 浮窗均通过。TeX 结果用 `data-opt-render-kind=tex` 和完整加载的 `TeX formula preview` 图片确认，未把即时草稿当编译结果。源码输入 `\c` 时原生列表出现带 `main.tex` 来源的 `\cN` 和 physics 项，选择后插入，Undo 撤销后源码与测试前完全一致。
 
-云端预览创建并保留一个共享工作区 `6aed7960ad6fe90a5e8595aa`（Overleaf Personal Tools — Preview）。首次目录读取超时，手动 Check 同一项目后成功，随后真实公式 TeX 图片成功，未重复创建工作区。首次连接失败不是目录字段漂移的证明；共享项目仅保留合成导言区/公式。原稿未用于验收。
+云端预览创建并保留一个共享工作区 `<synthetic-preview-project>`（Overleaf Personal Tools — Preview）。首次目录读取超时，手动 Check 同一项目后成功，随后真实公式 TeX 图片成功，未重复创建工作区。首次连接失败不是目录字段漂移的证明；共享项目仅保留合成导言区/公式。原稿未用于验收。
 
 缓存基线为 1 temporary、461 bytes、3 真实页面、0 pins。仅切 Keep project locally 不改变版本，Sync 后同一快照晋升 persistent，变为 922 bytes（正文 461 + 镜像 461）；切回 On-demand 不降级。原路径只读镜像中的 main.tex 350 bytes、chapter.tex 111 bytes 均逐字节及 SHA-256 匹配，ACL 无写数据/追加数据权限。Open source folder 打开的 Explorer 窗口标题与该 scope 匹配。合成 main.tex 已追加唯一注释 `% OPT_CACHE_REV_20261106_B`，用于后续新 temporary 生命周期检查。
 
@@ -46,11 +48,11 @@ MathJax 自定义 `\cN` 浮窗、Code 模式的 Gaussian 积分/physics 偏导�
 
 ## 0.12.17 实际复测
 
-用户重载 0.12.17 后，第 4 轮 `01a1afaf-dac5-7ee3-9557-5bcfaa7afb5c` 实际输出 `PARTIAL_KEEP_OK` 和公式；运行中发送一次 Steer 后，后续 28 行带 `STEER_ACK`。Stop 得到 interrupted，刷新后保留 2113 字符。canonical 仍没有 agentMessage，但本地只有一个合并后的助手记录，SHA-256 为 `58b39e7f792cf1aad1d8642e3e9a13d688faa67fd5119493d5cff794d7b9fce3`，后续同步未变。第一次发送前遇到账户连接超时，草稿恢复；确认后台没有新增 turn 后才手动重试，没有自动重发。
+用户重载 0.12.17 后，第 4 轮 `<synthetic-turn-4>` 实际输出 `PARTIAL_KEEP_OK` 和公式；运行中发送一次 Steer 后，后续 28 行带 `STEER_ACK`。Stop 得到 interrupted，刷新后保留 2113 字符。canonical 仍没有 agentMessage，但本地只有一个合并后的助手记录，SHA-256 为 `58b39e7f792cf1aad1d8642e3e9a13d688faa67fd5119493d5cff794d7b9fce3`，后续同步未变。第一次发送前遇到账户连接超时，草稿恢复；确认后台没有新增 turn 后才手动重试，没有自动重发。
 
-用户随后在同一 Desktop 聊天发送“这是双端验收，请只回答 DESKTOP_ORIGIN_OK”。第 5 轮 `01a1afb9-4a5f-77c3-b492-77e5fdd900ca` completed，网页自动出现该问题和回答，native 与 canonical 各有唯一 user/assistant，回答 SHA-256 一致。第 4 轮部分回答仍保持原哈希。此项证明桌面发起的最终问答回流，不扩大为双方实时生成指示或 writer 交接全部分支已验证。
+用户随后在同一 Desktop 聊天发送“这是双端验收，请只回答 DESKTOP_ORIGIN_OK”。第 5 轮 `<synthetic-turn-5>` completed，网页自动出现该问题和回答，native 与 canonical 各有唯一 user/assistant，回答 SHA-256 一致。第 4 轮部分回答仍保持原哈希。此项证明桌面发起的最终问答回流，不扩大为双方实时生成指示或 writer 交接全部分支已验证。
 
-用户自行在扩展设置页添加 DeepSeek 并授权实测；密钥未读取或输出。选择其 `https://api.deepseek.com` / `deepseek-flash`，普通上下文只发送合成测试内容。API 独立聊天 `37eb7742-7a75-4161-98d8-86ede97750a5` 第 1 轮完成 `DS_API_OK` 和公式；第 2 轮生成过快，正常完成，未计作取消成功；第 3 轮 Thinking 时点击 Stop，最终 cancelled、没有空助手消息、没有自动重发。真实历史共 3 个 turn、3 个用户消息和 2 个助手消息，刷新恢复。切回 Codex 后历史保持分离。本机合成 API 服务已停止，本轮服务统计为 0 请求，未冒充供应商验收。
+用户自行在扩展设置页添加 DeepSeek 并授权实测；密钥未读取或输出。选择其 `https://api.deepseek.com` / `deepseek-flash`，普通上下文只发送合成测试内容。API 独立聊天 `<synthetic-api-conversation>` 第 1 轮完成 `DS_API_OK` 和公式；第 2 轮生成过快，正常完成，未计作取消成功；第 3 轮 Thinking 时点击 Stop，最终 cancelled、没有空助手消息、没有自动重发。真实历史共 3 个 turn、3 个用户消息和 2 个助手消息，刷新恢复。切回 Codex 后历史保持分离。本机合成 API 服务已停止，本轮服务统计为 0 请求，未冒充供应商验收。
 
 公式点击显示 Copied，但 Browser API 剪贴板读回停留在工具自己的占位值，因此没有将自动读回计作成功。用户实际点击公式并 Ctrl+V 后确认“没问题”，该项记为人工验收。Code/Visual 切换、重新连接编辑器、浅色主题/16px 字号下布局均已实操；结束时恢复深色主题/12px、MathJax、Codex、On-demand、Queue，关闭公式点击复制与提示两个临时开关。未改默认项目设置。
 
@@ -58,13 +60,13 @@ MathJax 自定义 `\cN` 浮窗、Code 模式的 Gaussian 积分/physics 偏导�
 
 ## Codex 项目归属与剩余边界
 
-用户报告聊天未进入 Codex 的 Overleaf 项目。已确认 Windows 首次安装说明遗漏 `--workspace`，当时 helper 工作目录为私有数据目录且没有配置项目 ID。重新执行安装并绑定 `E:\Learning\Code\Overleaf` 后，精确 backend project ID 为 `01a1af39-2297-75c1-bbf6-c9f3a2ec6979`；安装说明与审计现已补充该检查，普通更新保留配置已有单元回归。
+用户报告聊天未进入 Codex 的 Overleaf 项目。已确认 Windows 首次安装说明遗漏 `--workspace`，当时 helper 工作目录为私有数据目录且没有配置项目 ID。重新执行安装并绑定 `<redacted-Codex-workspace>` 后，精确 backend project ID 为 `<synthetic-backend-project>`；安装说明与审计现已补充该检查，普通更新保留配置已有单元回归。
 
-真实新建聊天 `01a1afc0-d7b8-7410-b2fb-e465e38ed8b0` 的 cwd 与 backend projectId 均正确，但 Desktop 项目管理工具仍返回 projectId=null。这证明 backend 项目与 Desktop 侧栏项目归属不能等同。旧聊天的工具迁移被拒绝（无法安全确定来源项目），由用户手动移动；新聊天通过 Desktop 专用移动工具成功。随后工具读回两者均属于侧栏 Overleaf 项目 `74bb06de-d9ac-49f1-ba8f-2f7e8c730fe5`。
+真实新建聊天 `<synthetic-conversation-B>` 的 cwd 与 backend projectId 均正确，但 Desktop 项目管理工具仍返回 projectId=null。这证明 backend 项目与 Desktop 侧栏项目归属不能等同。旧聊天的工具迁移被拒绝（无法安全确定来源项目），由用户手动移动；新聊天通过 Desktop 专用移动工具成功。随后工具读回两者均属于侧栏 Overleaf 项目 `<synthetic-sidebar-project>`。
 
 只读检查当前 Desktop 包 `26.1103.3517.0` 表明：侧栏管理维护独立的 server-to-legacy 项目映射，自动采纳 backend thread.projectId 受 `localProjectTaskMembership` 控制；未读取或修改该功能开关的用户实值。对外 named pipe 的 owner/follower 白名单不提供项目归属方法。普通 local 项目也不使用 `metadata.codex.localProjectId` 建立映射，该字段用于 ChatGPT backing 的恢复，不能凭名称猜测写入。没有直接改 Codex 数据库、全局状态或私有 Electron bridge。因此，本轮可交付的是后台项目自动绑定，以及已明确归入桌面项目的现有两条交互测试聊天；后续新聊天的桌面侧栏自动归类仍是未解决限制，可能需要桌面 Move 操作。此前协议版本证据来自旧包，不能混称为同一版本全分支实测。
 
-缓存最后页面退出后的自动回收已真实通过：三个页面减至一页后，pages=1、pins=0，persistent 与 temporary 均保留；关闭最后一页后，Chrome 正常后台触发清理。07:30:25 UTC 只读观察到 pages=0、pins=0，empty_since 已过 32.84 秒。temporary `80b8e61692e6fa65c3b10521faa97326d6abfab25a1d8cd4996dd60416900956` 的元数据、manifest 及独占 main.tex blob 均消失；persistent `b56651c4e3b0e6989c92bccccfa848cd941f319443b05e38916138baec9a8524` 与镜像仍在，main.tex 350 bytes、chapter.tex 111 bytes 的哈希及镜像逐字节吻合，共享 chapter blob 未误删。没有直接调用 reconcile、GC 或手动删除文件来模拟通过。
+缓存最后页面退出后的自动回收已真实通过：三个页面减至一页后，pages=1、pins=0，persistent 与 temporary 均保留；关闭最后一页后，Chrome 正常后台触发清理。07:30:25 UTC 只读观察到 pages=0、pins=0，empty_since 已过 32.84 秒。temporary `<synthetic-temporary-snapshot>` 的元数据、manifest 及独占 main.tex blob 均消失；persistent `<synthetic-retained-snapshot>` 与镜像仍在，main.tex 350 bytes、chapter.tex 111 bytes 的哈希及镜像逐字节吻合，共享 chapter blob 未误删。没有直接调用 reconcile、GC 或手动删除文件来模拟通过。
 
 用户执行时明确确认后，在真实页面点击 Confirm source cleanup，缓存变为 0 versions、0 bytes。只读核对确认该 scope 的 manifest、镜像文件和 blob 均清空（空父目录保留）；Codex 原会话 10 消息/5 轮、新会话 2 消息/1 轮，以及 DeepSeek 的 5 消息/3 轮全部保留，部分回答哈希不变。网页重新打开原会话仍显示 `DESKTOP_ORIGIN_OK`。随后 Sync project cache 实际重新上传当前两文件，恢复为 1 temporary、487 bytes、0 retained、1 page、0 protected operations。合成项目原文件和云端 PDF 保留，测试页已留给用户；没有清理其他项目。
 

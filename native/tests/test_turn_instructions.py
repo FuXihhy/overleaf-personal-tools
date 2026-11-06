@@ -34,8 +34,8 @@ class TurnInstructionsTests(unittest.TestCase):
         self.messages = Messages()
         self.patch = mock.patch.object(host, 'write_message', self.messages.add)
         self.patch.start()
-        self.server = ResumeSettingsServer(Path(self.temp.name))
-        self.native = host.NativeHost(io.BytesIO(), host.SessionStore(Path(self.temp.name) / 'state'), lambda cwd, **kwargs: self.server)
+        self.server = ResumeSettingsServer(Path(self.temp.name).resolve())
+        self.native = host.NativeHost(io.BytesIO(), host.SessionStore(Path(self.temp.name).resolve() / 'state'), lambda cwd, **kwargs: self.server)
 
     def tearDown(self):
         self.native.close()

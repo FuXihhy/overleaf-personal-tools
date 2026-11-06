@@ -34,7 +34,7 @@ from project_context import ProjectContextError, ProjectContextStore
 from cache_lifecycle import CacheLifecycle, CACHE_OPERATIONS, CACHE_FIELDS, validate_cache_request
 from context_transport import MAX_VALUE_BYTES, build_additional_context
 
-VERSION = "0.12.17"
+VERSION = "0.12.18"
 HOST_NAME = "com.overleaf.personal_tools.codex"
 # A 2,000-entry Unicode path manifest can exceed 2 MiB even with no content.
 # Individual operations retain their tighter validated limits.

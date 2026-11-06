@@ -244,19 +244,27 @@ def main():
     actions = parser.add_mutually_exclusive_group()
     actions.add_argument("--install", action="store_true", help="Register the host for this user's Google Chrome.")
     actions.add_argument("--uninstall", action="store_true", help="Remove only this host's registration and marked directory.")
+    parser.add_argument('--api-only', action='store_true',
+                        help='Install or remove the API helper without accessing Codex or its MCP configuration.')
     parser.add_argument("--extension-manifest", type=Path, default=Path(__file__).resolve().parent.parent / "manifest.json")
     parser.add_argument('--workspace', type=Path, help='Existing Codex project directory; history stays in its private data directory.')
     parser.add_argument('--project-id', help='Existing app-server backend project ID; otherwise resolved from the workspace.')
     options = parser.parse_args()
+    if options.api_only and (options.workspace or options.project_id):
+        parser.error('--api-only cannot be combined with --workspace or --project-id.')
     home = Path.home()
     if options.uninstall:
         directory, _ = paths(home)
         require_owned_directory(directory)
-        source = Path(__file__).resolve().parent / 'codex_host.py'
-        spec = importlib.util.spec_from_file_location('opt_codex_reader_remove', str(source))
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        unregister_reader_mcp(directory, module.codex_path())
+        if options.api_only:
+            if (directory / READER_MARKER).exists():
+                raise ValueError('This helper has a Codex reader registration. Run --uninstall without --api-only to remove that owned registration first.')
+        else:
+            source = Path(__file__).resolve().parent / 'codex_host.py'
+            spec = importlib.util.spec_from_file_location('opt_codex_reader_remove', str(source))
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            unregister_reader_mcp(directory, module.codex_path())
         directory, manifest_path = uninstall(home)
         print("Removed %s and %s" % (manifest_path, directory))
         return
@@ -275,10 +283,11 @@ def main():
         project_id = resolve_project_id(source, workspace)
     if options.install:
         install(identifier, source, home, workspace, project_id)
-        spec = importlib.util.spec_from_file_location('opt_codex_reader_setup', str(source))
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        configure_reader_mcp(directory, module.codex_path())
+        if not options.api_only:
+            spec = importlib.util.spec_from_file_location('opt_codex_reader_setup', str(source))
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            configure_reader_mcp(directory, module.codex_path())
         print("Installed %s for extension %s" % (HOST_NAME, identifier))
     else:
         # Preparation is deliberately read-only; registration needs --install.

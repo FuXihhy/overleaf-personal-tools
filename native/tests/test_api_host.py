@@ -30,7 +30,7 @@ class APIHostTests(unittest.TestCase):
         self.worker_patch = mock.patch.object(host.NativeHost, '_worker', gated_worker)
         self.worker_patch.start()
         self.server_factory = mock.Mock(side_effect=AssertionError('API requests must not launch Codex'))
-        self.native = host.NativeHost(io.BytesIO(), host.SessionStore(Path(self.temp.name) / 'state'),
+        self.native = host.NativeHost(io.BytesIO(), host.SessionStore(Path(self.temp.name).resolve() / 'state'),
                                       self.server_factory)
         self.profile = self.native.profiles.save({
             'name': 'Synthetic API', 'baseUrl': 'https://api.example.invalid/v1',

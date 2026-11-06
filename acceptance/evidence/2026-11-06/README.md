@@ -10,15 +10,15 @@
 
 Desktop 发起的 `DESKTOP_ORIGIN_OK` 问题与回答回到 Overleaf 的同一会话；底部状态准确写作 `Local service checked`。这张图片证明最终问答同步，不证明所有桌面生成中的接管分支。
 
-![Desktop 回流到 Overleaf](desktop-origin.jpg)
+![Desktop 回流到 Overleaf](https://raw.githubusercontent.com/FuXihhy/overleaf-personal-tools/e9bbb263b8372720b6c41d15681c434dd4c603b6/acceptance/evidence/2026-11-06/desktop-origin.jpg)
 
 用户配置的真实 DeepSeek API 返回合成标记与数学公式。图片只展示合成问题与回答，不包含连接密钥。
 
-![DeepSeek 实际回答](deepseek.jpg)
+![DeepSeek 实际回答](https://raw.githubusercontent.com/FuXihhy/overleaf-personal-tools/e9bbb263b8372720b6c41d15681c434dd4c603b6/acceptance/evidence/2026-11-06/deepseek.jpg)
 
 Code 模式显示本机 TeX 渲染的 Gaussian 积分及 `physics` 偏导公式。验收时另核对了实际 TeX 渲染标记和图片加载状态，未把即时 MathJax 草稿计作 TeX 编译成功。
 
-![本机 TeX 预览，0.12.16 阶段](local-tex.jpg)
+![本机 TeX 预览，0.12.16 阶段](https://raw.githubusercontent.com/FuXihhy/overleaf-personal-tools/e9bbb263b8372720b6c41d15681c434dd4c603b6/acceptance/evidence/2026-11-06/local-tex.jpg)
 
 ## 结果与边界
 

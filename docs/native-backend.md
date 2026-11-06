@@ -1,8 +1,8 @@
-# Optional local TeX backend
+# Optional local TeX backend — macOS implementation
 
 The extension defaults to MathJax. The optional **TeX → 本机 TeX** choice sends the generated preview document to the dedicated Chrome native host `com.overleaf.personal_tools`. The host returns a PDF through Chrome's native-messaging pipe. It starts no HTTP server and accepts no URL, shell command, executable path, or file path outside that document. Cloud and local TeX results use the same browser-only PDF.js rasterizer.
 
-The native host is currently a macOS implementation for a system TeX Live/MacTeX installation under `/usr/local/texlive`, discovered through `/Library/TeX/texbin`. It uses the existing `/usr/bin/python3` and Python standard library. It does not install TeX, packages, Python libraries, or a background service. Missing packages produce the compiler's diagnostic. User-level `~/texmf` packages and user fonts are intentionally outside the sandbox; copy needed source into the Overleaf project or install the package in the system TeX tree.
+The shared host supports macOS and Windows. This page describes the macOS branch; see the [cross-platform installation guide](installation.md) and [Windows isolation details](windows-development.md) for Windows. The macOS branch uses a system TeX Live/MacTeX installation under `/usr/local/texlive`, discovered through `/Library/TeX/texbin`. It uses the existing `/usr/bin/python3` and Python standard library. It does not install TeX, packages, Python libraries, or a background service. Missing packages produce the compiler's diagnostic. User-level `~/texmf` packages and user fonts are intentionally outside the sandbox; copy needed source into the Overleaf project or install the package in the system TeX tree.
 
 ## Installation
 
@@ -18,7 +18,7 @@ This default operation is read-only. To register the prepared host for the curre
 /usr/bin/python3 native/install.py --install
 ```
 
-The installer derives the stable extension ID from `manifest.json`'s public `key`: SHA-256, first 16 digest bytes, hexadecimal digits mapped to `a`–`p`. The registration allows exactly that one `chrome-extension://…/` origin. It copies the host and a launcher using a fixed Python path into `~/Library/Application Support/OverleafPersonalTools/native-host/`, and writes only its dedicated manifest under Chrome's `NativeMessagingHosts` directory. Re-run `--install` after updating the native Python code. The browser extension itself is still loaded separately from `dist/`.
+The installer derives the stable extension ID from `manifest.json`'s public `key`: SHA-256, first 16 digest bytes, hexadecimal digits mapped to `a`–`p`. The registration allows exactly that one `chrome-extension://…/` origin. It copies the host, its platform companion modules, and a launcher using a fixed Python path into `~/Library/Application Support/OverleafPersonalTools/native-host/`, and writes only its dedicated manifest under Chrome's `NativeMessagingHosts` directory. Re-run `--install` after updating the native Python code. The browser extension itself is still loaded separately from `dist/`.
 
 ```sh
 /usr/bin/python3 native/install.py --uninstall
@@ -28,7 +28,7 @@ Uninstallation removes only the dedicated manifest and the directory carrying th
 
 ## Security boundary and limits
 
-TeX source can execute more than mathematical notation. The host therefore always invokes `/usr/bin/sandbox-exec` with a `deny default` profile. If the sandbox is missing or cannot launch, compilation fails; there is no unsandboxed fallback. The status request performs a real sandboxed compiler startup probe, rather than reporting presence of a binary as sufficient.
+TeX source can execute more than mathematical notation. The macOS branch therefore always invokes `/usr/bin/sandbox-exec` with a `deny default` profile. If the sandbox is missing or cannot launch, compilation fails; there is no unsandboxed fallback. The status request performs a real sandboxed compiler startup probe, rather than reporting presence of a binary as sufficient.
 
 The child may read its temporary job, the detected system TeX tree, system libraries/locales, and system fonts. It may write only within that job and `/dev/null`. Network and other Mach services remain denied. The profile never allows the user's home directory. A literal read of `/` is required by current macOS process startup; this does not allow reads of files below it. Only the chosen TeX binary, its `xdvipdfmx` converter, and the system shell needed for XeTeX's converter pipe can execute. These child processes inherit the same sandbox.
 

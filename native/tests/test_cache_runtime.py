@@ -41,7 +41,7 @@ def crash_before_mirror_publication(root):
 class RuntimeCacheTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.store = ProjectContextStore(Path(self.tmp.name) / 'sources')
+        self.store = ProjectContextStore(Path(self.tmp.name).resolve() / 'sources')
         self.now = 1000
         self.cache = CacheLifecycle(self.store, clock=lambda: self.now)
         self.cache.acquire_page(SCOPE, 'browser', 'doc', 'lease')
@@ -229,7 +229,7 @@ class RuntimeCacheTests(unittest.TestCase):
 class NativeCacheAdmissionTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.host = host.NativeHost(io.BytesIO(), store=host.SessionStore(Path(self.tmp.name)))
+        self.host = host.NativeHost(io.BytesIO(), store=host.SessionStore(Path(self.tmp.name).resolve()))
         self.scope = self.host.store.key(self.request())
         self.cache = self.host.cache
         self.cache.acquire_page(self.scope, 'browser', 'doc', 'lease')
@@ -290,7 +290,7 @@ class NativeCacheAdmissionTests(unittest.TestCase):
         self.host.server_factory = lambda cwd, **kwargs: server
 
     def test_real_worker_codex_submission_pins_before_rpc_and_releases_on_terminal(self):
-        self.wire_server(FakeServer(Path(self.tmp.name)))
+        self.wire_server(FakeServer(Path(self.tmp.name).resolve()))
         events = Messages()
         with mock.patch.object(host, 'write_message', events.add):
             self.host.handle(self.request(snapshotId=self.snapshot))
@@ -299,7 +299,7 @@ class NativeCacheAdmissionTests(unittest.TestCase):
         self.assertEqual(self.cache.info(self.scope)['pinCount'], 0)
 
     def test_real_worker_lost_rpc_ack_retains_unknown_pin(self):
-        self.wire_server(FakeServer(Path(self.tmp.name)), failure=host.HostError('transport disconnected'))
+        self.wire_server(FakeServer(Path(self.tmp.name).resolve()), failure=host.HostError('transport disconnected'))
         events = Messages()
         with mock.patch.object(host, 'write_message', events.add):
             self.host.handle(self.request(snapshotId=self.snapshot))
@@ -309,7 +309,7 @@ class NativeCacheAdmissionTests(unittest.TestCase):
         self.assertEqual((pins[0]['state'], pins[0]['thread']), ('uncertain', None))
 
     def test_real_worker_reader_rejection_releases_only_unsubmitted_pin(self):
-        server = FakeServer(Path(self.tmp.name))
+        server = FakeServer(Path(self.tmp.name).resolve())
         self.wire_server(server, reader=False)
         events = Messages()
         with mock.patch.object(host, 'write_message', events.add):
@@ -319,7 +319,7 @@ class NativeCacheAdmissionTests(unittest.TestCase):
         self.assertNotIn('turn/start', [method for method, _params in server.calls])
 
     def test_steer_pins_its_exact_version_until_original_turn_terminal(self):
-        server = SteerServer(Path(self.tmp.name))
+        server = SteerServer(Path(self.tmp.name).resolve())
         self.wire_server(server)
         events = Messages()
         with mock.patch.object(host, 'write_message', events.add):

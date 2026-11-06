@@ -12,7 +12,9 @@ import os
 from pathlib import Path
 import re
 import shutil
+import sys
 import time
+import unicodedata
 import uuid
 
 from project_context import (ProjectContextError, _atomic_bytes, _check_components,
@@ -328,6 +330,19 @@ class CacheLifecycle:
     @staticmethod
     def validate_mirror_paths(entries, base):
         """Virtual manuscript names are not automatically valid disk names."""
+        def identity(value):
+            if IS_WINDOWS:
+                return value.upper()
+            if sys.platform == 'darwin':
+                # The usual macOS volume ignores case and Unicode canonical
+                # spelling. In particular, differently named parent folders
+                # can silently merge even when their leaf filenames differ.
+                # Conservatively reject these aliases on case-sensitive Mac
+                # volumes too, so a retained mirror stays portable between
+                # supported macOS installations. Never rename project paths.
+                return unicodedata.normalize('NFD', value).casefold()
+            return value
+
         names = set()
         directories = {}
         for entry in entries:
@@ -336,13 +351,13 @@ class CacheLifecycle:
             # A file cannot also be the parent directory of another file.
             for i in range(1, len(parts)):
                 parent = '/'.join(parts[:i])
-                key = parent.upper() if IS_WINDOWS else parent
+                key = identity(parent)
                 if key in names:
                     raise ProjectContextError('The local mirror contains a file/directory name collision.')
                 if key in directories and directories[key] != parent:
-                    raise ProjectContextError('The local mirror cannot preserve differently cased directory names.')
+                    raise ProjectContextError('The local mirror cannot safely preserve directory names differing only in case or Unicode spelling.')
                 directories[key] = parent
-            name = path.upper() if IS_WINDOWS else path
+            name = identity(path)
             if name in names or any(other.startswith(name + '/') for other in names):
                 raise ProjectContextError('The local mirror cannot represent colliding project paths.')
             names.add(name)

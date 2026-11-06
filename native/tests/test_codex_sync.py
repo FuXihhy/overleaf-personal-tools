@@ -70,7 +70,7 @@ class SyncTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(); self.world = World(); self.messages = Messages()
         self.patch = mock.patch.object(host, 'write_message', self.messages.add); self.patch.start()
-        self.store = host.SessionStore(Path(self.temp.name)/'state')
+        self.store = host.SessionStore(Path(self.temp.name).resolve()/'state')
         self.store.write(request(), THREAD)
         self.native = host.NativeHost(io.BytesIO(), self.store, self.world.server)
         self.number = 0

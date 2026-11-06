@@ -77,7 +77,7 @@ class FakeRouter:
 class DesktopIPCTests(unittest.TestCase):
     def setUp(self):
         self.budget_patch = mock.patch.object(ipc, 'ROUTER_DISCOVERY_TIMEOUT', 0.05); self.budget_patch.start()
-        self.temp = tempfile.TemporaryDirectory(); self.path = Path(self.temp.name) / 'ipc.sock'
+        self.temp = tempfile.TemporaryDirectory(); self.path = Path(self.temp.name).resolve() / 'ipc.sock'
         os.chmod(self.temp.name, 0o700); self.router = FakeRouter(self.path); self.client = None
         self.pipe_patch = None
         if os.name == 'nt':
@@ -147,7 +147,7 @@ class DesktopIPCTests(unittest.TestCase):
         os.chmod(self.path, 0o600); os.chmod(self.temp.name, 0o755)
         with self.assertRaises(ipc.DesktopIPCError): ipc.DesktopIPC(self.path)
         os.chmod(self.temp.name, 0o700)
-        alias = Path(self.temp.name) / 'alias.sock'; alias.symlink_to(self.path)
+        alias = Path(self.temp.name).resolve() / 'alias.sock'; alias.symlink_to(self.path)
         with self.assertRaises(ipc.DesktopIPCError): ipc.DesktopIPC(alias)
 
     def test_capability_absence_fails_without_follow_or_send(self):

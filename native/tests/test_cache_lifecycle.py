@@ -8,6 +8,7 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import cache_lifecycle
 from cache_lifecycle import CacheLifecycle
 from project_context import ProjectContextError, ProjectContextStore
 
@@ -217,6 +218,54 @@ class CacheLifecycleTests(unittest.TestCase):
         self.exited()
         self.assertEqual(self.candidates(), [])
         self.assertEqual(self.cache.inspect_cleanup(SCOPE)['retention'][self.snapshot], 'persistent')
+
+    def test_mac_mirror_rejects_case_and_unicode_aliases_before_source_publication(self):
+        # Different leaf names used to hide a parent-directory alias: the first
+        # capture succeeded on APFS, then the next capture reported user edits.
+        pairs = [
+            ('Chapter/a.tex', 'chapter/b.tex'),
+            ('Caf\u00e9/a.tex', 'Cafe\u0301/b.tex'),
+            ('Equation.tex', 'equation.tex'),
+            ('caf\u00e9.tex', 'cafe\u0301.tex'),
+            ('Chapter', 'chapter/child.tex'),
+        ]
+        self.page()
+        before = self.cache.info(SCOPE)
+        with mock.patch.object(cache_lifecycle, 'IS_WINDOWS', False), mock.patch.object(cache_lifecycle.sys, 'platform', 'darwin'):
+            for pair in pairs:
+                for paths in (pair, tuple(reversed(pair))):
+                    with self.subTest(paths=paths):
+                        files = {'main.tex': 'synthetic root', paths[0]: 'first source', paths[1]: 'second source'}
+                        manifest = [{'path': path, 'bytes': len(content.encode('utf-8')),
+                                     'sha256': hashlib.sha256(content.encode('utf-8')).hexdigest()}
+                                    for path, content in files.items()]
+                        with self.assertRaisesRegex(ProjectContextError, 'local mirror'):
+                            self.store.begin(SCOPE, 'main.tex', manifest, 'persistent', 'token-1')
+        self.assertEqual(self.cache.info(SCOPE), before)
+        self.assertEqual(list(self.store.uploads.iterdir()), [])
+        self.assertFalse((self.root / 'mirrors').exists())
+
+    def test_mac_noncolliding_unicode_mirror_can_be_synchronized_again(self):
+        self.page()
+        files = {'main.tex': 'synthetic root', 'Caf\u00e9/\u7ae0\u8282.tex': 'exact \u03b1\r\n\x1a source',
+                 'Caf\u00e9/other.tex': 'another file in the same directory'}
+        manifest = [{'path': path, 'bytes': len(content.encode('utf-8')),
+                     'sha256': hashlib.sha256(content.encode('utf-8')).hexdigest()}
+                    for path, content in files.items()]
+        with mock.patch.object(cache_lifecycle, 'IS_WINDOWS', False), mock.patch.object(cache_lifecycle.sys, 'platform', 'darwin'):
+            upload = self.store.begin(SCOPE, 'main.tex', manifest, 'persistent', 'token-1')
+            for path, content in files.items():
+                self.store.chunk(SCOPE, upload, path, 0, content)
+            snapshot = self.store.commit(SCOPE, upload)
+            self.cache.manage_snapshot(SCOPE, snapshot, 'persistent')
+            # Repeating a real capture must reuse the same immutable version.
+            repeated = self.store.begin(SCOPE, 'main.tex', manifest, 'persistent', 'token-1')
+            self.assertEqual(self.store.missing_paths(SCOPE, repeated), [])
+            self.assertEqual(self.store.commit(SCOPE, repeated), snapshot)
+        mirror = self.root / 'mirrors' / SCOPE / snapshot
+        self.assertEqual({path.relative_to(mirror).as_posix(): path.read_bytes()
+                          for path in mirror.rglob('*') if path.is_file()},
+                         {path: content.encode('utf-8') for path, content in files.items()})
 
     def test_normal_mode_cannot_register_full_project_source(self):
         with self.assertRaisesRegex(ProjectContextError, 'Normal context'):

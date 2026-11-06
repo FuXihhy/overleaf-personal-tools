@@ -24,7 +24,7 @@ from api_provider import APIBackend, APIConnection, APIError, APIModelsUnavailab
 class ProfileTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.store = ProfileStore(Path(self.temp.name) / 'profiles')
+        self.store = ProfileStore(Path(self.temp.name).resolve() / 'profiles')
     def tearDown(self): self.temp.cleanup()
     def make(self, **values):
         return self.store.save(dict({'name': 'Test API', 'baseUrl': 'https://example.invalid/v1',
@@ -79,7 +79,7 @@ class ProfileTests(unittest.TestCase):
         with self.assertRaises(APIError): self.make(id=profile['id'])
 
     def test_symlink_files_refused(self):
-        target = Path(self.temp.name) / 'other'; target.write_text('[]')
+        target = Path(self.temp.name).resolve() / 'other'; target.write_text('[]')
         make_symlink(self.store.path, target)
         with self.assertRaises(APIError): self.make()
         self.assertEqual(target.read_text(), '[]')
@@ -362,9 +362,9 @@ class ModelConnection:
 class BackendTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory()
-        self.profiles=ProfileStore(Path(self.temp.name)/'profiles')
+        self.profiles=ProfileStore(Path(self.temp.name).resolve()/'profiles')
         self.profile=self.profiles.save({'name':'Synthetic API','baseUrl':'http://127.0.0.1:43124/v1','model':'configured-model','apiKey':''})
-        self.host=FakeHost(host.SessionStore(Path(self.temp.name)/'history'))
+        self.host=FakeHost(host.SessionStore(Path(self.temp.name).resolve()/'history'))
         self.created=[]
         def factory(*args):
             value=ModelConnection(*args); self.created.append(value); return value

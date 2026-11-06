@@ -19,8 +19,8 @@ class InstallerRepairTests(unittest.TestCase):
     def test_missing_manifest_still_removes_only_owned_registry_reference(self):
         for installer, name in ((tex_installer, 'host.py'), (codex_installer, 'codex_host.py')):
             with self.subTest(host=installer.HOST_NAME), tempfile.TemporaryDirectory() as folder:
-                home = Path(folder) / 'user'
-                source = Path(folder) / name
+                home = Path(folder).resolve() / 'user'
+                source = Path(folder).resolve() / name
                 source.write_text('# synthetic\n')
                 with mock.patch.object(installer, 'registration') as registry:
                     directory, manifest = installer.install('a' * 32, source, home)
@@ -33,7 +33,7 @@ class InstallerRepairTests(unittest.TestCase):
     @unittest.skipUnless(os.name == 'nt', 'Windows CMD encoding regression')
     def test_real_launcher_preserves_unicode_space_percent_and_binary_frames(self):
         with tempfile.TemporaryDirectory() as folder:
-            directory = Path(folder) / '中文 spaced % marker & bang!'
+            directory = Path(folder).resolve() / '中文 spaced % marker & bang!'
             directory.mkdir()
             script = directory / 'host.py'
             script.write_text('import sys\nsys.stdout.buffer.write(sys.stdin.buffer.read())\n', encoding='utf-8')

@@ -271,7 +271,7 @@ class ConfigurationIsolationTests(unittest.TestCase):
 class StoreTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.store = host.SessionStore(Path(self.temp.name)/'state')
+        self.store = host.SessionStore(Path(self.temp.name).resolve()/'state')
     def tearDown(self):self.temp.cleanup()
     def test_per_account_and_project_isolation(self):
         value=request();self.store.write(value,THREAD)
@@ -291,7 +291,7 @@ class StoreTests(unittest.TestCase):
     def test_rejects_invalid_thread(self):
         with self.assertRaises(host.HostError):self.store.write(request(),'../../evil')
     def test_rejects_symlink(self):
-        target=Path(self.temp.name)/'secret';target.write_text('untouched')
+        target=Path(self.temp.name).resolve()/'secret';target.write_text('untouched')
         try:
             self.store.path(request()).symlink_to(target)
         except OSError as error:
@@ -307,8 +307,8 @@ class HostTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.messages=Messages()
         self.patch=mock.patch.object(host,'write_message',self.messages.add);self.patch.start()
-        self.server=FakeServer(Path(self.temp.name))
-        self.native=host.NativeHost(io.BytesIO(), host.SessionStore(Path(self.temp.name)/'state'), lambda cwd, **kwargs:self.server)
+        self.server=FakeServer(Path(self.temp.name).resolve())
+        self.native=host.NativeHost(io.BytesIO(), host.SessionStore(Path(self.temp.name).resolve()/'state'), lambda cwd, **kwargs:self.server)
     def tearDown(self):self.native.close();self.patch.stop();self.temp.cleanup()
     def test_status_does_not_expose_identity_or_auth_payload(self):
         self.native.handle({'version':1,'id':'status','op':'status'})
@@ -384,7 +384,7 @@ class HostTests(unittest.TestCase):
 class InstallerTests(unittest.TestCase):
     def test_confined_install_update_uninstall_and_origin(self):
         with tempfile.TemporaryDirectory() as home:
-            root=Path(home);identifier=installer.extension_id(json.loads((ROOT/'manifest.json').read_text()))
+            root=Path(home).resolve();identifier=installer.extension_id(json.loads((ROOT/'manifest.json').read_text()))
             directory,manifest=installer.install(identifier,ROOT/'native/codex_host.py',root)
             self.assertEqual(json.loads(manifest.read_text())['allowed_origins'],['chrome-extension://'+identifier+'/'])
             self.assertTrue((directory/'codex_host.py').exists())
@@ -396,7 +396,7 @@ class InstallerTests(unittest.TestCase):
             self.assertFalse(manifest.exists());self.assertEqual((unrelated/'keep').read_text(),'keep')
     def test_refuses_unowned_directory(self):
         with tempfile.TemporaryDirectory() as home:
-            directory,_=installer.paths(Path(home));directory.mkdir(parents=True)
-            with self.assertRaises(ValueError):installer.uninstall(Path(home))
+            directory,_=installer.paths(Path(home).resolve());directory.mkdir(parents=True)
+            with self.assertRaises(ValueError):installer.uninstall(Path(home).resolve())
 
 if __name__=='__main__':unittest.main()

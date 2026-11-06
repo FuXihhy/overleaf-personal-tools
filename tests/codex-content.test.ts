@@ -103,6 +103,32 @@ describe('Codex content integration', () => {
     expect(mocks.sourceRequest).toHaveBeenCalledWith('source-begin',expect.objectContaining({cacheMode,leaseToken:'12345678-1234-4234-8234-123456789abc'}));
     expect(mocks.sourceRequest.mock.calls.filter(([op])=>op!=='source-begin').every(([,data])=>!('cacheMode' in data)&&!('leaseToken' in data))).toBe(true);
   });
+  it.each(['on-demand','persistent'] as const)('keeps the captured %s lifetime when settings change during a pending send',async cacheMode=>{
+    await boot();await mocks.actions!.saveCodex!({...DEFAULT_CODEX_SETTINGS,cacheMode});
+    const lease=deferred<{documentId:string;leaseToken:string}>();mocks.acquireCachePage.mockReturnValueOnce(lease.promise);
+    const sending=mocks.panelOptions!.onSend('Use the settings captured with this question',selection);await flush();
+    expect(mocks.acquireCachePage).toHaveBeenCalledOnce();
+    await mocks.actions!.saveCodex!({...DEFAULT_CODEX_SETTINGS,cacheMode:cacheMode==='persistent'?'on-demand':'persistent'});
+    lease.resolve({documentId:'synthetic-document',leaseToken:'12345678-1234-4234-8234-123456789abc'});await sending;
+    expect(mocks.sourceRequest).toHaveBeenCalledWith('source-begin',expect.objectContaining({cacheMode}));
+    const asks=mocks.request.mock.calls.filter(([op])=>op==='ask');expect(asks).toHaveLength(1);
+    expect(asks[0][1].settings.cacheMode).toBe(cacheMode);
+  });
+  it('repairs the original snapshot using its captured lifetime after future requests switch to Normal',async()=>{
+    await boot();await mocks.actions!.saveCodex!({...DEFAULT_CODEX_SETTINGS,cacheMode:'persistent'});
+    let checks=0;mocks.sourceCheck.mockImplementation(async(data:{snapshotId:string},event:(value:CodexEvent)=>void)=>{
+      if(++checks===1){
+        await mocks.actions!.saveCodex!({...DEFAULT_CODEX_SETTINGS,contextMode:'selection',cacheMode:'normal'});
+        event({id:'check',type:'error',errorCode:'source_unavailable'});throw new Error('Missing original source');
+      }
+      return {id:'check',type:'source',snapshotId:data.snapshotId};
+    });
+    await mocks.panelOptions!.onSend('Keep this project context',selection);
+    expect(mocks.sourceRequest.mock.calls.filter(([op])=>op==='source-begin').map(([,data])=>data.cacheMode)).toEqual(['persistent','persistent']);
+    expect(mocks.sourceCheck.mock.calls.map(([data])=>data.snapshotId)).toEqual(['ab'.repeat(32),'ab'.repeat(32)]);
+    expect(mocks.request.mock.calls.filter(([op])=>op==='ask')).toHaveLength(1);
+    expect(mocks.model!().codex?.cacheMode).toBe('normal');
+  });
   it('requires a reviewed exact cache revision before explicit cleanup and leaves chat history independent',async()=>{
     await boot();const cacheInfo={folder:'C:\\Synthetic\\managed-source',snapshotCount:2,totalBytes:400,lastSyncedAt:1800000000,temporaryCount:0,persistentCount:2,legacyCount:0,pageCount:1,pinCount:0,cleanupPending:false,cacheRevision:'ab'.repeat(32)};
     mocks.sourceRequest.mockResolvedValue({id:'source',type:'source',cacheInfo});
@@ -799,6 +825,32 @@ describe('optional API source integration', () => {
 });
 
 describe('captured follow-up queue and active-turn steering',()=>{
+  it.each(['queue','steer'] as const)('keeps captured retention for a pending %s when future requests switch to Normal',async action=>{
+    await boot();await mocks.actions!.saveCodex!({...DEFAULT_CODEX_SETTINGS,contextMode:'selection',cacheMode:'normal'});
+    const first=deferred<CodexEvent>(),started=deferred<void>();let asks=0;
+    mocks.request.mockImplementation((op,data,onEvent)=>{
+      if(op==='ask'){
+        asks++;onEvent?.({id:'ask',type:'started',threadId:conversationId,turnId:'active-turn',canSteer:true});
+        if(asks===1){started.resolve();return first.promise;}
+        return Promise.resolve({id:'ask',type:'done',text:'Queued response'});
+      }
+      if(op==='steer')return Promise.resolve({id:'steer',type:'steered',threadId:conversationId,turnId:'active-turn',userMessageId:'addition'});
+      return Promise.resolve({id:'other',type:'done'});
+    });
+    const sending=mocks.panelOptions!.onSend('First question');await started.promise;
+    await mocks.actions!.saveCodex!({...DEFAULT_CODEX_SETTINGS,cacheMode:'persistent'});
+    const lease=deferred<{documentId:string;leaseToken:string}>();mocks.acquireCachePage.mockReturnValueOnce(lease.promise);
+    const adding=action==='queue'?mocks.panelOptions!.onQueue!('Captured addition',selection):mocks.panelOptions!.onSteer!('Captured addition',selection);
+    await flush();expect(mocks.acquireCachePage).toHaveBeenCalledOnce();
+    await mocks.actions!.saveCodex!({...DEFAULT_CODEX_SETTINGS,contextMode:'selection',cacheMode:'normal'});
+    lease.resolve({documentId:'synthetic-document',leaseToken:'12345678-1234-4234-8234-123456789abc'});await adding;
+    expect(mocks.sourceRequest).toHaveBeenCalledWith('source-begin',expect.objectContaining({cacheMode:'persistent'}));
+    if(action==='queue')expect(mocks.panel.setQueue.mock.lastCall![0][0].prompt.settings.cacheMode).toBe('persistent');
+    first.resolve({id:'ask',type:'done',text:'First answer'});await sending;await flush();
+    const additions=mocks.request.mock.calls.filter(([op,data])=>(op==='ask'||op==='steer')&&data.question==='Captured addition');
+    expect(additions).toHaveLength(1);expect(additions[0][1].settings.cacheMode).toBe('persistent');
+    expect(mocks.request.mock.calls.filter(([op])=>op==='cancel')).toHaveLength(0);
+  });
   it('retains legacy project queue entries for editing but never sends their partial context as a complete snapshot', async () => {
     withAccount();mocks.request.mockResolvedValue(historyPage());
     const legacy={id:'legacy',state:'queued',prompt:{question:'Old excerpt question',settings:{...DEFAULT_CODEX_SETTINGS},files:[{path:'main.tex',content:'% CONTEXT EXCERPT'}],note:'',conversationId}};

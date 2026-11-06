@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.12.18 — 2026-11-06
+
+- 合并 Windows PR #1 的安装、Native Messaging、项目缓存与共享交互修复，统一为 macOS／Windows 源码；Windows 0.12.17 历史验收保留原范围，不冒充本版在 Windows 的重新验收。
+- 修复异步源码捕获期间修改设置导致缓存保留模式变化的问题：发送、排队、引导和缓存修复沿用请求捕获时的模式；手动同步的过时操作不会继续按旧模式上传。
+- 修复 macOS 本地保留镜像的大小写与 Unicode 等价路径冲突：拒绝不能忠实保存的别名，不静默合并目录或重命名；非冲突 Unicode 镜像可重复同步。
+- 新增共享安装器 `--api-only`：只用兼容 API 时无需 Codex 程序／登录，也不修改 MCP。隔离安装与实际 Native Messaging 启动测试覆盖纯 API 安装、卸载和自有 reader 保护。
+- 规范化 Mac 测试临时目录，保留生产环境的软链接拒绝。Mac 检查：前端 56 个文件／976 项通过，TypeScript 与构建通过；native 428 项中 392 项通过、36 项跳过；脚本 24 项中 21 项通过、3 项跳过。
+- Mac 实际 Chrome 加载 0.12.18，专用合成 Overleaf 项目完成两文件同步、真实 Codex 跨文件读取，生成中停止后部分回答保留与刷新恢复，以及本机 pdfLaTeX 的实际公式预览。未改动真实稿件；未把后台健康、最终历史或其他平台证据当作完整交互通过。详见 [Mac 验收记录](docs/mac-acceptance.md)。
+- 重整 README、跨平台安装／更新／卸载指南、使用与数据说明，更新实际权限和源码缓存边界；发布包纳入验收入口、构建配置与相应许可说明。公开分发与自定义源码可见许可详见仓库许可文件。
+
 ## 0.12.17 Windows development — 2026-11-06（独立开发分支，未发布）
 
 - 新增 `scripts/windows-acceptance.py` 与 `acceptance/README.md`：显式一条命令安装/更新、默认无推理健康检查、可选完整回归、脱敏报告及两文件合成项目 ZIP；区分 PASS/FAIL/SKIP/MANUAL。API-only 安装不要求 Codex 程序或登录；本机 TeX 权限仅在显式请求时配置。

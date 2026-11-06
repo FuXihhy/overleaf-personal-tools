@@ -99,7 +99,7 @@ class DesktopHandoffTests(unittest.TestCase):
         self.world.owner = 'desktop'
         self.ipc = FakeIPC(self.world)
         self.factory = mock.Mock(return_value=self.ipc)
-        self.store = host.SessionStore(Path(self.temp.name) / 'state')
+        self.store = host.SessionStore(Path(self.temp.name).resolve() / 'state')
         self.store.write(request(), THREAD)
         self.native = host.NativeHost(io.BytesIO(), self.store, self.server, desktop_factory=self.factory)
         self.native.handle(history(id='initial'))

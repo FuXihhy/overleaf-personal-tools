@@ -1,8 +1,8 @@
-# Windows 开发版：安装、更新与数据
+# Windows 实现：安装、隔离与数据
 
 首次安装优先使用[安装与验收快速指南](../acceptance/README.md)的一条命令流程；本文保留逐步安装、权限和数据边界，便于诊断与维护。Windows 发现的共享问题及 macOS 回归建议见[跨平台同步说明](cross-platform-fixes-0.12.17.md)。
 
-本分支基于私有仓库 v0.12.14、提交 `0803251324c32a2f213f39a4ece7ddac264ab126`。扩展显示 `0.12.17 Windows development`，固定 ID 为 `pffppbkokpnfafpechmlambifflkmbbn`，包含 LaTeX Preview 和 Codex Assistant。不要把本分支的 Windows 验证结论追溯到未修改的原始发布 ZIP；前次证据见 [验收记录](windows-acceptance.md)，当前修复及真实页面进展见 [连接修复记录](windows-connection-acceptance.md)。
+Windows 支持已合入默认分支，固定扩展 ID 为 `pffppbkokpnfafpechmlambifflkmbbn`，包含 LaTeX Preview 和 Codex Assistant。请按[当前安装指南](installation.md)使用同版本扩展与 helper。0.12.15–0.12.17 的原始开发验收分别见[验收记录](windows-acceptance.md)和[连接修复记录](windows-connection-acceptance.md)；这些证据不追溯适用于未修改的 v0.12.14 发布包，也不自动代表后续版本所有操作均已实测。
 
 ## 安装与更新
 
@@ -14,12 +14,12 @@
 pnpm install --frozen-lockfile
 pnpm check
 python -X utf8 -m unittest discover -s native/tests
-python -X utf8 native/install_codex.py --install --workspace 'E:\Learning\Code\Overleaf'
+python -X utf8 native/install_codex.py --install --workspace '<your-existing-Codex-project-path>'
 python -X utf8 native/install.py --install
-python -X utf8 scripts/windows-installation-audit.py --expect-workspace 'E:\Learning\Code\Overleaf'
+python -X utf8 scripts/windows-installation-audit.py --expect-workspace '<your-existing-Codex-project-path>'
 ```
 
-上述工作目录是本机 Codex 中已有的 Overleaf 项目根目录，其他设备应替换成自己的对应路径；不是子目录 `overleaf-personal-tools`。首次安装时，`--workspace` 从 app-server 的项目列表按完整根路径及项目名查找唯一匹配，保存到 `codex-native-host/workspace.json`。找不到或有歧义会报错，不自动创建项目。若需显式指定 `--project-id`，必须使用 app-server 返回的 backend 项目 ID；它可能不同于桌面项目管理工具显示的 ID。只使用 API、且不需要 Codex 项目归属时，可以省略安装的 `--workspace` 和审计的 `--expect-workspace`。
+执行前将 `<your-existing-Codex-project-path>` 替换成本机 Codex 中已有的项目根目录；不是子目录 `overleaf-personal-tools`。首次安装时，`--workspace` 从 app-server 的项目列表按完整根路径及项目名查找唯一匹配，保存到 `codex-native-host/workspace.json`。找不到或有歧义会报错，不自动创建项目。若需显式指定 `--project-id`，必须使用 app-server 返回的 backend 项目 ID；它可能不同于桌面项目管理工具显示的 ID。只使用 API 时，助手安装加 `--api-only`，省略 `--workspace`；更建议使用统一 runner 的 `--setup --api-only`，该路径不要求 Codex 程序或登录，也不修改 MCP。
 
 两个安装器分别管理 Codex/API 和 TeX host。已经绑定工作区后，更新可只执行 `python -X utf8 native/install_codex.py --install`，它逐字节保留现有 `workspace.json` 及另外存储的历史/API 配置。**首次仅执行 `--install` 不会建立 app-server 项目绑定**：没有该配置时，新 Codex 聊天以私有 `codex-assistant` 数据目录作为工作目录，也没有显式 backend 项目归属。没有 `--install` 时只输出准备信息。Windows 启动器使用本次安装的 Python 绝对路径；移动/删除该 Python 后必须重装 helper，不能依赖 Chrome 的 PATH。
 
@@ -39,10 +39,10 @@ TeX 在无网络 capability 的 Windows AppContainer 中执行，每次编译使
 
 Windows LuaLaTeX 每次使用独立字体缓存，字体发现的文件 I/O 比其他引擎慢，墙钟时间限制为 24 秒；其他引擎仍为 14 秒。Job 的累计用户态 CPU 仍限制为 12 秒，取消无需等待该时限。Windows LuaHBTeX 1.18 的 `--safer` 会阻断 luaotfload，因此此分支使用已验证的 OS 文件/网络隔离，保留 `--nosocket`、`--no-shell-escape` 和 dotfile 限制；macOS 参数保持原样。
 
-配置器保留原 ACL，为专用 `overleafPersonalToolsTeXRead` capability 增加 TeX 树只读/执行权限。长路径解析还需要 `texlive` 父目录和磁盘根目录本身的只读/遍历权限；这两处不向其他子目录继承。若普通账户无权修改根目录，helper 注册仍可完成，但沙盒配置会明确失败。管理员只需执行一次，例如本机：
+配置器保留原 ACL，为专用 `overleafPersonalToolsTeXRead` capability 增加 TeX 树只读/执行权限。长路径解析还需要 `texlive` 父目录和磁盘根目录本身的只读/遍历权限；这两处不向其他子目录继承。若普通账户无权修改根目录，helper 注册仍可完成，但沙盒配置会明确失败。管理员只需执行一次；先把下列三个路径占位符替换为自己的安装位置：
 
 ```powershell
-& 'D:\anaconda3\python.exe' -X utf8 'E:\Learning\Code\Overleaf\overleaf-personal-tools\native\windows_tex.py' --configure 'D:\texlive\2024'
+& '<python-executable-path>' -X utf8 '<checkout-path>\native\windows_tex.py' --configure '<texlive-root-path>'
 ```
 
 输出 `configured: true` 后，以普通用户重跑 TeX 安装器。日常 Chrome、Codex 和 TeX 不需要管理员身份。其他安装位置需调整路径；配置器拒绝不符合布局或含 reparse point 的目录。
@@ -63,4 +63,4 @@ Windows Desktop 通信使用实际安装包中核查的 named pipe 协议，与�
 
 ## 停用与卸载
 
-只需临时停用时，在 Chrome 扩展管理页关闭扩展开关即可。卸载本机连接时分别运行 `python -X utf8 native/install_codex.py --uninstall` 和 `python -X utf8 native/install.py --uninstall`；安装器仅删除经过归属检查的注册项与程序目录，Codex 安装器同时移除匹配的 `overleaf_project` reader 注册。单独存放的聊天历史、API 配置和项目缓存不由程序卸载命令清空；需要删除项目源码时，先在对应项目的缓存面板检查并显式清理。不要以删除整个 `.codex` 目录或修改系统 TeX 权限作为卸载步骤。
+只需临时停用时，在 Chrome 扩展管理页关闭扩展开关即可。卸载本机连接时分别运行 `python -X utf8 native/install_codex.py --uninstall` 和 `python -X utf8 native/install.py --uninstall`；安装器仅删除经过归属检查的注册项与程序目录，Codex 安装器同时移除匹配的 `overleaf_project` reader 注册。纯 API 安装可用 `--uninstall --api-only`；存在自有 reader 标记时应使用普通卸载，以免留下失效注册。单独存放的聊天历史、API 配置和项目缓存不由程序卸载命令清空；需要删除项目源码时，先在对应项目的缓存面板检查并显式清理。不要以删除整个 `.codex` 目录或修改系统 TeX 权限作为卸载步骤。

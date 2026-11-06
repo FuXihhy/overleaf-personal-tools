@@ -203,7 +203,7 @@ class InstallerTests(unittest.TestCase):
 
     def test_install_uninstall_are_confined_to_marked_directory(self):
         with tempfile.TemporaryDirectory(prefix="opt-install-test-") as directory:
-            home = Path(directory)
+            home = Path(directory).resolve()
             outside = home / "keep-me.txt"; outside.write_text("retain")
             installation, manifest_path = installer.install("a" * 32, DIRECTORY / "host.py", home)
             self.assertTrue((installation / "host.py").is_file())
