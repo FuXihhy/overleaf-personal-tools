@@ -8,7 +8,7 @@ Windows 10.0.26200；Chrome 156.0.8078.81；Git 2.55.0.windows.3；Node 24.19.0�
 
 两个 helper 安装在 `C:\Users\Lenovo\.overleaf-personal-tools` 下，避免 MSIX 对 LocalAppData 的文件重定向。Chrome HKCU NativeMessagingHosts 注册到此处的 manifest，两个 `allowed_origins` 均为固定扩展 ID。旧试装文件保留；只修复明确属于本产品的旧注册值。没有复制 Mac 凭据、历史或稿件缓存。
 
-用户已手动加载 `dist`，在真实 Overleaf 页面确认 LaTeX Preview / Codex Assistant 两个入口；随后报告“codex连接成功，tex显示 Windows AppContainer + Job Object 沙盒可用”。这是用户提供的真实页面连接证据。更新后的三种缓存模式尚需最终重新加载扩展及页面确认。
+用户已手动加载 `dist`，在真实 Overleaf 页面确认 LaTeX Preview / Codex Assistant 两个入口；随后报告“codex连接成功，tex显示 Windows AppContainer + Job Object 沙盒可用”。最终更新后，用户再次重新加载 `0.12.15 Windows development` 并刷新专用测试项目，确认“已重新加载，三种模式和两项连接都正常”。因此最终版本的安装、三模式设置入口和两项连接已获得真实页面用户确认；下面明确区分尚未执行的完整交互验收。
 
 ## 已执行的验证及其范围
 
