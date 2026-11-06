@@ -1,6 +1,6 @@
 # Overleaf Personal Tools
 
-**0.12.16 Windows 开发分支（2026-11-06）**：本分支已实现 Windows helper、Native Messaging 注册、私有 ACL/文件锁、Codex Desktop named pipe、本机 TeX AppContainer，以及普通、按需和本地保留三种项目缓存模式。0.12.16 修复真实 Chrome 页面身份被误拒绝及连接成功提示误导，见 [连接修复与交互验收记录](docs/windows-connection-acceptance.md)。安装与更新见 [Windows 开发版说明](docs/windows-development.md)，前一版本验证见 [Windows 验收记录](docs/windows-acceptance.md)。以下旧版本说明保留原功能背景，不能作为 Windows 已验收的证据。
+**0.12.17 Windows 开发分支（2026-11-06）**：本分支已实现 Windows helper、Native Messaging 注册、私有 ACL/文件锁、Codex Desktop named pipe、本机 TeX AppContainer，以及普通、按需和本地保留三种项目缓存模式。0.12.16 修复真实 Chrome 页面身份被误拒绝及连接成功提示误导；0.12.17 修复真实交互中发现的中断回答丢失与预览旧错误残留，见 [连接修复与交互验收记录](docs/windows-connection-acceptance.md)。安装与更新见 [Windows 开发版说明](docs/windows-development.md)，前一版本验证见 [Windows 验收记录](docs/windows-acceptance.md)。以下旧版本说明保留原功能背景，不能作为 Windows 已验收的证据。
 
 0.12.14：仅作用于 Overleaf 英文站 `https://www.overleaf.com/project/*` 和中文站 `https://cn.overleaf.com/project/*` 的个人 Chrome 扩展。根据项目宏包声明和自定义宏补充原生自动补全，在 Code 和 LaTeX Visual 模式中提供独立的 **MathJax / TeX** 公式预览。TeX 模式可再选择 **Overleaf 云端 / 本机** 编译。**Codex Assistant** 支持文稿选区提问、回答引用追问、项目对话历史、左右面板和 LaTeX 复制；默认使用本机 Codex，也可按项目选择自己的 DeepSeek 或其他兼容 API。
 
@@ -39,6 +39,8 @@ Codex Assistant 默认使用本机 Codex 的现有登录，通过单独的 Nativ
 ```sh
 /usr/bin/python3 native/install_codex.py --install
 ```
+
+上面不带工作区的命令适合更新已有绑定或只使用 API。首次需要为新 Codex 聊天配置已有 Overleaf 项目的工作目录和 app-server 项目 ID 时，应加 `--workspace /absolute/path/to/Overleaf`（Windows 的完整命令与配置审计见 [安装说明](docs/windows-development.md)）。没有现有 `workspace.json` 时，单独 `--install` 会使用 helper 的私有数据目录。app-server 绑定与 Desktop 侧栏分类是独立记录；即使新线程的工作目录和 backend 项目 ID 正确，新旧聊天仍可能需要在 Desktop 使用 Move / 移动到项目操作归入 Overleaf。补配置不自动迁移旧聊天，扩展不直接改写 Desktop 全局状态或聊天库。
 
 它注册 `com.overleaf.personal_tools.codex`，与公式预览的 TeX 连接程序分别安装、分别更新。只运行扩展构建或旧的 `native/install.py` 不会安装 Codex 连接程序。安装后重新加载扩展、刷新 Overleaf，打开 **Settings → Extension → Codex Assistant** 即自动读取登录状态、可用模型和各模型支持的推理强度；此操作不发送提问。加载时显示进度，失败时可点击 **重试连接 / Retry connection**，也可用 **检查连接 / Check connection** 主动刷新。成功结果在当前页面保留五分钟；若正在生成回答，检查延后到回答结束，避免打断。完整安装、卸载及运行说明见 [Codex 本机连接](docs/codex-backend.md)。
 
@@ -100,7 +102,7 @@ Codex 桌面续聊可使用同一快照引用和 `overleaf_project` MCP；读取
 
 每条 Codex 回答的 **Copy source / 复制原文** 按钮复制完整原始 Markdown，保留公式 LaTeX。公式没有浮动复制按钮。在 **Settings → Extension → Codex Assistant** 可启用默认关闭的 **Click formulas to copy LaTeX / 单击公式复制 LaTeX**，启用后单击完整公式即可复制不含定界符的 TeX，成功时保留短暂淡色反馈。独立的 **Show formula copied notice / 显示公式复制提示** 开关默认关闭；开启后还会短暂显示小型“公式已复制”提示，不抢输入焦点。普通文字选区跨过已渲染的公式时，公式也会显示选中高亮，Cmd/Ctrl+C 保留原公式源码。复制不修改正文或当前引用。
 
-可将此扩展已登记的 Codex 会话归入已有的 Codex 项目，后续会话沿用安装时配置的工作目录；网页的账号／项目隔离不变。在 macOS 中指定已有 Codex 项目目录，例如：
+可为此扩展后续创建的 Codex 会话配置已有 app-server 项目及工作目录；网页的账号／项目隔离不变。Desktop 侧栏归类仍需单独核验，不能由以下安装命令保证。在 macOS 中指定已有 Codex 项目目录，例如：
 
 ```sh
 /usr/bin/python3 native/install_codex.py --install --workspace "$HOME/Documents/Overleaf"

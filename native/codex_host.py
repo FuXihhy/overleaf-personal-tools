@@ -34,7 +34,7 @@ from project_context import ProjectContextError, ProjectContextStore
 from cache_lifecycle import CacheLifecycle, CACHE_OPERATIONS, CACHE_FIELDS, validate_cache_request
 from context_transport import MAX_VALUE_BYTES, build_additional_context
 
-VERSION = "0.12.16"
+VERSION = "0.12.17"
 HOST_NAME = "com.overleaf.personal_tools.codex"
 # A 2,000-entry Unicode path manifest can exceed 2 MiB even with no content.
 # Individual operations retain their tighter validated limits.
@@ -1800,7 +1800,12 @@ class NativeHost:
                     if answer:
                         key = turn['id'] + ':assistant'; keys.append(key)
                         self.store.record(request, identifier, key, 'assistant', answer, created=max(started + 1, completed))
-                    self.store.prune_turn_messages(request, identifier, turn['id'], keys, preserve_partial=status == 'inProgress')
+                    # An interrupted Codex turn may omit the agentMessage it
+                    # already streamed. Keep that turn's local fallback; a
+                    # nonempty canonical answer above still replaces it, and
+                    # completed turns remain authoritative even when empty.
+                    self.store.prune_turn_messages(request, identifier, turn['id'], keys,
+                                                   preserve_partial=status in ('inProgress', 'interrupted'))
                     self.store.remember_turn(request, identifier, turn['id'], fingerprint)
                 elif not full_scan and status != 'inProgress':
                     stop = True
@@ -2009,10 +2014,19 @@ class NativeHost:
                         completed_items[str(item.get("id", "answer"))] = item["text"]
                         if item.get('phase') in (None, 'final_answer'):
                             final_items[str(item.get('id', 'answer'))] = item['text']
-                answer = "\n\n".join(completed_items.values()) if completed_items else "".join(pieces.values())
+                stopped = turn.get('status') == 'interrupted'
+                if stopped:
+                    # Earlier completed items must not hide a later unfinished
+                    # item. Replace only matching streamed item IDs, so each
+                    # delivered segment survives cancellation exactly once.
+                    stopped_items = dict(pieces)
+                    stopped_items.update(completed_items)
+                    answer = '\n\n'.join(stopped_items.values())
+                else:
+                    answer = "\n\n".join(completed_items.values()) if completed_items else "".join(pieces.values())
                 if len(answer.encode("utf-8")) > MAX_OUTPUT:
                     raise HostError("The answer exceeded the response limit.")
-                self.pending_history["text"] = "\n\n".join(final_items.values()) if final_items else answer
+                self.pending_history["text"] = "\n\n".join(final_items.values()) if final_items and not stopped else answer
                 self.emit(request["id"], "done", threadId=thread_id, text=answer,
                           cancelled=interrupted or turn.get("status") == "interrupted")
                 return
@@ -2148,6 +2162,11 @@ class NativeHost:
                 if not observed:
                     continue
                 answer = observed.get('text', '')
+                # Owner snapshots can temporarily omit streamed items, including
+                # at interruption. Preserve the last observed text until a
+                # canonical/owner completion explicitly supplies its answer.
+                if not answer and observed.get('status') in ('inProgress', 'interrupted'):
+                    answer = self.pending_history['text']
                 if len(answer.encode('utf-8')) > MAX_OUTPUT:
                     ipc.interrupt(turn_id)
                     raise HostError('The answer exceeded the response limit. Ask for a shorter answer.')

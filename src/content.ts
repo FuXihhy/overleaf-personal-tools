@@ -183,6 +183,18 @@ async function start() {
   let texTimer: ReturnType<typeof setTimeout>;
   let scheduledTexKey = '';
   let lastPreviewError: {key:string;result:PreviewResult} | undefined;
+  let previewStatus: {key:string;message:string;previous:string} | undefined;
+  function publishPreviewStatus(key:string,message:string) {
+    const previous=previewStatus&&model.status===previewStatus.message?previewStatus.previous:model.status;
+    previewStatus={key,message,previous};model.status=message;ui.update();
+  }
+  function clearPreviewStatus(key?:string) {
+    if(!previewStatus||key!==undefined&&previewStatus.key!==key)return;
+    const owned=previewStatus;previewStatus=undefined;
+    // A setting, editor or index operation may have published a newer status.
+    // Preview recovery may retire only the message it still owns.
+    if(model.status===owned.message){model.status=owned.previous;ui.update();}
+  }
 
   const ui = mountNativeSettings(() => model, {
     async openProjectCache(){
@@ -224,6 +236,7 @@ async function start() {
       const previewChanged=needsIndex || sourcesChanged || previous.preview!==next.preview
         || previous.previewEngine!==next.previewEngine || previous.texBackend!==next.texBackend || previous.texCompiler!==next.texCompiler;
       if(previewChanged) {
+        clearPreviewStatus();
         renderGeneration++;pdfAbort?.abort();void cancelLocalTex();clearTimeout(texTimer);
         renderCache.clear();draftCache.clear();lastPreviewError=undefined;scheduledTexKey='';
       }
@@ -892,6 +905,7 @@ async function start() {
   }
 
   function invalidateTexContext(){
+    clearPreviewStatus();
     const draft=draftCache.get(previewKey());
     revision++;renderGeneration++;renderCache.clear();scheduledTexKey='';lastPreviewError=undefined;
     if(draft)remember(draftCache,previewKey(),draft);
@@ -910,9 +924,10 @@ async function start() {
       const engine=await loadRenderer();
       if(!isCurrent())return;
       const result=await engine.renderFormula(formula.tex,previewIndex,formula.display,{tolerant:true});
-      if(!isCurrent())return;
+      if(!isCurrent()||renderCache.has(key))return;
       remember(draftCache,key,{...result,draft:true});syncPreview();
-      if(result.diagnostics.length){model.status=result.diagnostics[0];ui.update();}
+      if(result.diagnostics.length&&lastPreviewError?.key!==key)publishPreviewStatus(key,result.diagnostics[0]);
+      else if(model.settings.previewEngine==='mathjax')clearPreviewStatus(key);
     }catch(error){
       if(!isCurrent())return;
       remember(draftCache,key,{fallbackText:formula.tex,draft:true,diagnostics:[String(error)]});syncPreview();
@@ -948,12 +963,12 @@ async function start() {
       if(!isCurrent())return;
       const bitmap=await pdfEngine.renderCloudPdf(compiled.pdf,{signal:pdfAbort.signal});
       if(!isCurrent())return;
-      remember(renderCache,key,{...bitmap,diagnostics:[...compiled.diagnostics,...bitmap.diagnostics]});syncPreview();
+      remember(renderCache,key,{...bitmap,diagnostics:[...compiled.diagnostics,...bitmap.diagnostics]});syncPreview();clearPreviewStatus(key);
     }catch(error) {
       if(!isCurrent())return;
       const message=(error instanceof Error?error.message:String(error));
       lastPreviewError={key,result:{diagnostics:['所选预览引擎未能生成结果：'+message]}};
-      model.status='公式预览失败：'+message;ui.update();
+      publishPreviewStatus(key,'公式预览失败：'+message);
     }finally {
       rendering=false;pdfAbort=undefined;
       if(pendingPreview){pendingPreview=false;scheduledTexKey='';schedulePreview();}
@@ -1055,6 +1070,7 @@ async function start() {
         if(message.formula && (typeof message.formula.tex!=='string'||message.formula.tex.length>32000))return;
         if(currentFormula?.tex===message.formula?.tex && currentFormula?.display===message.formula?.display && currentFormula?.location===message.formula?.location){syncPreview();return;}
         if(!message.formula||currentFormula?.location!==message.formula.location){currentAnchor=null;presented=undefined;}
+        clearPreviewStatus();
         clearTimeout(texTimer);scheduledTexKey='';lastPreviewError=undefined;
         currentFormula=message.formula;renderGeneration++;pdfAbort?.abort();void cancelLocalTex();schedulePreview();return;
       }

@@ -1,6 +1,6 @@
 # Windows 开发版：安装、更新与数据
 
-本分支基于私有仓库 v0.12.14、提交 `0803251324c32a2f213f39a4ece7ddac264ab126`。扩展显示 `0.12.16 Windows development`，固定 ID 为 `pffppbkokpnfafpechmlambifflkmbbn`，包含 LaTeX Preview 和 Codex Assistant。不要把本分支的 Windows 验证结论追溯到未修改的原始发布 ZIP；前次证据见 [验收记录](windows-acceptance.md)，当前修复及真实页面进展见 [连接修复记录](windows-connection-acceptance.md)。
+本分支基于私有仓库 v0.12.14、提交 `0803251324c32a2f213f39a4ece7ddac264ab126`。扩展显示 `0.12.17 Windows development`，固定 ID 为 `pffppbkokpnfafpechmlambifflkmbbn`，包含 LaTeX Preview 和 Codex Assistant。不要把本分支的 Windows 验证结论追溯到未修改的原始发布 ZIP；前次证据见 [验收记录](windows-acceptance.md)，当前修复及真实页面进展见 [连接修复记录](windows-connection-acceptance.md)。
 
 ## 安装与更新
 
@@ -12,11 +12,18 @@
 pnpm install --frozen-lockfile
 pnpm check
 python -X utf8 -m unittest discover -s native/tests
-python -X utf8 native/install_codex.py --install
+python -X utf8 native/install_codex.py --install --workspace 'E:\Learning\Code\Overleaf'
 python -X utf8 native/install.py --install
+python -X utf8 scripts/windows-installation-audit.py --expect-workspace 'E:\Learning\Code\Overleaf'
 ```
 
-两个安装器分别管理 Codex/API 和 TeX host。重复执行会更新专用程序目录，保留工作目录设置和另外存储的历史/API配置。没有 `--install` 时只输出准备信息。Windows 启动器使用本次安装的 Python 绝对路径；移动/删除该 Python 后必须重装 helper，不能依赖 Chrome 的 PATH。
+上述工作目录是本机 Codex 中已有的 Overleaf 项目根目录，其他设备应替换成自己的对应路径；不是子目录 `overleaf-personal-tools`。首次安装时，`--workspace` 从 app-server 的项目列表按完整根路径及项目名查找唯一匹配，保存到 `codex-native-host/workspace.json`。找不到或有歧义会报错，不自动创建项目。若需显式指定 `--project-id`，必须使用 app-server 返回的 backend 项目 ID；它可能不同于桌面项目管理工具显示的 ID。只使用 API、且不需要 Codex 项目归属时，可以省略安装的 `--workspace` 和审计的 `--expect-workspace`。
+
+两个安装器分别管理 Codex/API 和 TeX host。已经绑定工作区后，更新可只执行 `python -X utf8 native/install_codex.py --install`，它逐字节保留现有 `workspace.json` 及另外存储的历史/API 配置。**首次仅执行 `--install` 不会建立 app-server 项目绑定**：没有该配置时，新 Codex 聊天以私有 `codex-assistant` 数据目录作为工作目录，也没有显式 backend 项目归属。没有 `--install` 时只输出准备信息。Windows 启动器使用本次安装的 Python 绝对路径；移动/删除该 Python 后必须重装 helper，不能依赖 Chrome 的 PATH。
+
+**工作目录和 app-server 项目绑定不保证 Desktop 侧栏归类。** 本次 Windows 实际验收中，新线程的 `cwd` 和 backend `projectId` 已正确回读，但在执行移动操作前，Desktop 的本地项目分类仍为空；两者是独立的归属记录。新旧聊天都可能需要在 Desktop 使用 Move / 移动到项目操作归入 Overleaf，再核对侧栏结果。补配置不会自动迁移已有聊天，扩展也不直接改写 Desktop 全局状态或聊天库来强制分类。
+
+只读安装审计同时核验两个注册项、固定扩展来源、版本与 14 个 Python 安装副本，并在 `workspaceConfiguration` 中单独报告工作区状态。指定 `--expect-workspace` 时，缺少配置、路径不符或没有 backend 项目 ID 均返回失败；可再用 `--expect-project-id` 检查已核实的 backend ID。未指定期望工作区时，文件安装通过与 `workspaceStatus: unconfigured` 可以并存，并会明确输出警告。报告默认写到 `artifacts/windows-installation-audit-<版本>.json`；它只读取工作区路径和项目 ID，不读取凭据或历史，不调用 backend 验证项目当前是否存在，因此保留 `backendProjectVerified: false`。审计通过不证明任何新旧聊天已归入 Desktop 侧栏的目标项目。
 
 程序位于 `%USERPROFILE%\.overleaf-personal-tools\codex-native-host` 与 `native-host`；manifest 位于同一产品目录下的 `NativeMessagingHosts`。使用用户目录可避免打包版 Codex 将 LocalAppData 重定向到 MSIX 缓存，导致 Chrome 看不到同名文件。注册表使用 `HKCU\Software\Google\Chrome\NativeMessagingHosts`，只允许固定扩展 ID。遇到不属于本安装器的目录或注册项会报错，不覆盖。
 

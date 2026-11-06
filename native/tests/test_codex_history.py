@@ -257,6 +257,56 @@ class HistoryHostTests(unittest.TestCase):
         self.assertEqual(messages[1]['text'], 'First ')
         self.assertEqual(messages[0]['selection'], request()['selection'])
 
+    def test_stop_partial_survives_canonical_refresh_and_helper_restart(self):
+        self.server.finish = False
+        self.native.handle(request()); self.messages.wait('delta')
+        self.native.handle({'version': 1, 'id': 'stop', 'op': 'cancel', 'projectId': PROJECT})
+        self.messages.wait('done', 'stop')
+        done = self.messages.wait('done')
+        self.assertTrue(done['cancelled'])
+        self.assertEqual(done['text'], 'First ')
+        saved = self.native.store.page(request())['messages']
+        self.assertEqual([item['text'] for item in saved], [request()['question'], 'First '])
+        # The real app-server can persist the interrupted turn without an
+        # agentMessage item even though it already delivered assistant deltas.
+        canonical = {'data': [{'id': self.server.current_turn, 'status': 'interrupted',
+                              'items': [{'type': 'userMessage', 'content': [
+                                  {'type': 'text', 'text': request()['question']}]}]}], 'nextCursor': None}
+        self.server.pages = [canonical]
+        self.native.handle(history(id='after-stop'))
+        refreshed = self.messages.wait('history', 'after-stop')
+        self.assertEqual(refreshed['messages'], saved)
+        self.assertEqual(refreshed['remoteState'], 'idle')
+        self.assertEqual(sum(method == 'turn/start' for method, _ in self.server.calls), 1)
+
+        root = self.native.store.root
+        self.native.close()
+        self.server = HistoryServer(Path(self.temp.name))
+        self.server.pages = [canonical]
+        self.native = host.NativeHost(io.BytesIO(), host.SessionStore(root), lambda cwd, **kwargs: self.server)
+        self.native.handle(history(id='after-restart'))
+        restored = self.messages.wait('history', 'after-restart')
+        self.assertEqual(restored['messages'], saved)
+        self.assertFalse(any(method in ('thread/start', 'thread/resume', 'turn/start')
+                             for method, _ in self.server.calls))
+
+    def test_stop_keeps_unfinished_item_after_an_earlier_completed_item(self):
+        self.server.finish = False
+        self.native.handle(request()); self.messages.wait('delta')
+        turn_id = self.server.current_turn
+        self.server.events.put({'method': 'item/completed', 'params': {'threadId': THREAD,
+            'turnId': turn_id, 'item': {'id': 'answer', 'type': 'agentMessage',
+                                      'phase': 'final_answer', 'text': 'First section.'}}})
+        self.server.events.put({'method': 'item/agentMessage/delta', 'params': {
+            'threadId': THREAD, 'turnId': turn_id, 'itemId': 'second', 'delta': 'Second partial.'}})
+        self.native.handle({'version': 1, 'id': 'stop', 'op': 'cancel', 'projectId': PROJECT})
+        self.messages.wait('done', 'stop')
+        done = self.messages.wait('done')
+        self.assertTrue(done['cancelled'])
+        self.assertEqual(done['text'], 'First section.\n\nSecond partial.')
+        messages = self.native.store.page(request())['messages']
+        self.assertEqual([item['text'] for item in messages], [request()['question'], done['text']])
+
     def test_rejected_start_does_not_store_a_ghost_question(self):
         original = self.server.request
         def rejecting(method, params, timeout=None):

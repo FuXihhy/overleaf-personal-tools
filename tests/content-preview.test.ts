@@ -295,11 +295,66 @@ describe('content preview lifecycle through bridge events',()=>{
   });
 
   it('allows retrying a temporary TeX failure after leaving and re-entering the same formula',async()=>{
+    const original=mocks.model!().status;
     mocks.renderTex.mockRejectedValueOnce(new Error('Temporary compiler failure'));
     select('x');await advance(650);expect(mocks.model!().status).toContain('Temporary compiler failure');
     emit({type:'formula',formula:formula('x')});await advance(1000);expect(mocks.renderTex).toHaveBeenCalledOnce();
     emit({type:'formula',formula:null});select('x');await advance(650);
     expect(mocks.renderTex).toHaveBeenCalledTimes(2);expect(popup().querySelector('img')).not.toBeNull();
+    expect(mocks.model!().status).toBe(original);
+  });
+
+  it('retires a cloud metadata error when switching to Local and keeps the successful result free of the old failure',async()=>{
+    const original=mocks.model!().status;await mocks.actions!.save({...mocks.model!().settings,texBackend:'overleaf'});
+    mocks.renderTex.mockRejectedValueOnce(new Error('Reading the Overleaf main file setting timed out.'));
+    select('x');await advance(650);expect(mocks.model!().status).toContain('main file setting timed out');
+    await mocks.actions!.save({...mocks.model!().settings,texBackend:'local'});await advance(650);
+    expect(popup().querySelector('[data-opt-render-kind="tex"]')).not.toBeNull();expect(mocks.model!().status).toBe(original);
+    expect(mocks.renderTex.mock.calls.map(([input])=>input.settings.texBackend)).toEqual(['overleaf','local']);
+  });
+
+  it('never publishes a late failure from the backend that has been replaced',async()=>{
+    const old=deferred<{pdf:Uint8Array;diagnostics:string[]}>();await mocks.actions!.save({...mocks.model!().settings,texBackend:'overleaf'});
+    mocks.renderTex.mockReturnValueOnce(old.promise);select('x');await advance(650);
+    await mocks.actions!.save({...mocks.model!().settings,texBackend:'local'});await advance(650);
+    await mocks.actions!.defaults(mocks.model!().settings);const latest=mocks.model!().status;
+    old.reject(new Error('Old cloud metadata timeout'));await flush();expect(mocks.model!().status).toBe(latest);
+    await advance(650);expect(popup().querySelector('[data-opt-render-kind="tex"]')).not.toBeNull();expect(mocks.model!().status).toBe(latest);
+  });
+
+  it('does not replace a newer settings message when retiring a preview error or completing its retry',async()=>{
+    mocks.renderTex.mockRejectedValueOnce(new Error('Temporary compiler failure'));select('x');await advance(650);
+    await mocks.actions!.defaults(mocks.model!().settings);const latest=mocks.model!().status;
+    emit({type:'formula',formula:null});select('x');await advance(650);
+    expect(popup().querySelector('[data-opt-render-kind="tex"]')).not.toBeNull();expect(mocks.model!().status).toBe(latest);
+  });
+
+  it('clears an owned MathJax diagnostic after real TeX succeeds and ignores a late draft diagnostic',async()=>{
+    const original=mocks.model!().status;
+    mocks.renderFormula.mockResolvedValueOnce({svg:'<svg xmlns="http://www.w3.org/2000/svg"><text>draft</text></svg>',diagnostics:['Draft-only unsupported command']});
+    select('x');await advance(16);expect(mocks.model!().status).toBe('Draft-only unsupported command');
+    await advance(634);expect(popup().querySelector('[data-opt-render-kind="tex"]')).not.toBeNull();expect(mocks.model!().status).toBe(original);
+    const late=deferred<{svg:string;diagnostics:string[]}>();mocks.renderFormula.mockReturnValueOnce(late.promise);
+    select('y');await advance(650);expect(popup().querySelector('[data-opt-render-kind="tex"]')).not.toBeNull();
+    late.resolve({svg:'<svg xmlns="http://www.w3.org/2000/svg"><text>late</text></svg>',diagnostics:['Late draft failure']});await flush();
+    expect(mocks.model!().status).toBe(original);expect(popup().querySelector('[data-opt-render-kind="tex"]')).not.toBeNull();
+  });
+
+  it('preserves a newer project index status while a current TeX request finishes',async()=>{
+    const pending=deferred<{pdf:Uint8Array;diagnostics:string[]}>();mocks.renderTex.mockReturnValueOnce(pending.promise);select('x');await advance(650);
+    const rebuilding=deferred<typeof project>();mocks.discover.mockReturnValueOnce(rebuilding.promise);const refreshed=mocks.actions!.refresh();await flush();
+    expect(mocks.model!().status).toContain('正在分析');
+    pending.resolve({pdf:new TextEncoder().encode('old'),diagnostics:[]});await flush();expect(mocks.model!().status).toContain('正在分析');
+    rebuilding.resolve(project);await refreshed;const latest=mocks.model!().status;await advance(650);
+    expect(popup().querySelector('[data-opt-render-kind="tex"]')).not.toBeNull();expect(mocks.model!().status).toBe(latest);
+  });
+
+  it('keeps the selected TeX backend failure when a late MathJax draft supplies a fallback',async()=>{
+    const draft=deferred<{svg:string;diagnostics:string[]}>();mocks.renderFormula.mockReturnValueOnce(draft.promise);
+    mocks.renderTex.mockRejectedValueOnce(new Error('Current compiler failure'));select('x');await advance(650);
+    const failure=mocks.model!().status;expect(failure).toContain('Current compiler failure');
+    draft.resolve({svg:'<svg xmlns="http://www.w3.org/2000/svg"><text>draft</text></svg>',diagnostics:['Draft-only unsupported command']});await flush();
+    expect(popup().querySelector('[data-opt-render-kind="draft"]')).not.toBeNull();expect(mocks.model!().status).toBe(failure);
   });
 
   it('does not delay a service cache hit behind cloud cooldown or show a loading banner',async()=>{
