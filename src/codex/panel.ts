@@ -15,12 +15,16 @@ export interface CodexConnectionState {
   state: 'unknown' | 'checking' | 'connected' | 'reconnecting' | 'offline' | 'auth-required';
   message?: string;
   detail?: string;
+  connectionKind?: 'standalone';
+  projectReaderReady?: boolean;
+  readerError?: string;
+  checkedAt?: number;
 }
 export interface CodexPanelOptions {
   projectId: string;
   position?: 'left' | 'right';
   onPositionChange?(position: 'left' | 'right'): void | Promise<void>;
-  getSettings(): { enabled: boolean; clickToCopy?: boolean; copyToast?: boolean; providerId?: string; providerName?: string; busyMessageBehavior?: 'queue' | 'steer' };
+  getSettings(): { enabled: boolean; contextMode?: 'selection' | 'project'; clickToCopy?: boolean; copyToast?: boolean; providerId?: string; providerName?: string; busyMessageBehavior?: 'queue' | 'steer' };
   onVisibilityChange?(open: boolean): void;
   getIndex?(): ProjectIndex;
   onSend(question: string, selection?: CodexSelection, answerQuote?: CodexAnswerQuote): Promise<void>;
@@ -289,20 +293,27 @@ export function mountCodexAssistant(options: CodexPanelOptions) {
       connectionProviderId = providerId; connectionState = { state: 'unknown' }; announcedConnection = '';
       connectionAnnouncement.textContent = '';
     }
-    const zh = getLocale() === 'zh';
+    const zh = getLocale() === 'zh', projectMode=options.getSettings().contextMode==='project';
+    const cacheBlocked=projectMode&&cacheNoticeKind==='error';
+    const readerBlocked=projectMode&&!providerId&&connectionState.state==='connected'&&connectionState.projectReaderReady!==true;
+    const blocked=(cacheBlocked||readerBlocked)&&!['offline','auth-required'].includes(connectionState.state);
     const words = zh
-      ? { unknown: '未检查', checking: '连接中', connected: '已连接', reconnecting: '重连中', offline: '连接中断', 'auth-required': '请登录' }
-      : { unknown: 'Not checked', checking: 'Connecting', connected: 'Connected', reconnecting: 'Reconnecting', offline: 'Disconnected', 'auth-required': 'Sign in' };
-    const state = connectionState.state;
-    const label = `${assistantName()} · ${connectionState.message?.slice(0, 80) || words[state]}`;
-    const disabled = !options.onReconnect || reconnectPending || state === 'checking' || state === 'reconnecting';
+      ? { unknown: '未检查', checking: '检查中', connected: providerId?'已连接':'本机后台已检查', reconnecting: '重连中', offline: '连接中断', 'auth-required': '请登录',blocked:cacheBlocked?'项目同步失败':connectionState.projectReaderReady===false?'项目读取不可用':'项目读取待检查' }
+      : { unknown: 'Not checked', checking: 'Checking', connected: providerId?'Connected':'Local service checked', reconnecting: 'Reconnecting', offline: 'Disconnected', 'auth-required': 'Sign in',blocked:cacheBlocked?'Project sync failed':connectionState.projectReaderReady===false?'Project reader unavailable':'Project reader not verified' };
+    const state = blocked?'blocked':connectionState.state;
+    const label = `${assistantName()} · ${!blocked&&connectionState.message?.slice(0, 80) || words[state]}`;
+    const disabled = !options.onReconnect || reconnectPending || connectionState.state === 'checking' || connectionState.state === 'reconnecting';
     connection.dataset.state = state; connection.setAttribute('aria-disabled', String(disabled));
     if (connectionLabel.textContent !== label) connectionLabel.textContent = label;
     setLabel(connection, label);
-    connection.dataset.tooltip = [connectionState.detail?.slice(0, 800), options.onReconnect && !disabled ? zh ? '点击重新检查连接' : 'Click to check the connection again' : ''].filter(Boolean).join('\n') || label;
+    const serviceDetail=!providerId&&connectionState.connectionKind==='standalone'
+      ? zh?'已检查扩展启动的独立 Codex CLI 后台，与 Codex 桌面窗口是否打开无关。此检查未运行模型推理，也不代表当前问题已经成功发送。':'Checked the independent Codex CLI service started by this extension. It does not depend on the Codex desktop window being open. This check did not run model inference or confirm that the current question was sent.' : '';
+    const blockedDetail=cacheBlocked?text().cacheError:readerBlocked?connectionState.readerError||(zh?'本机连接尚未验证项目读取工具，请更新辅助程序后重新检查。普通上下文仍可使用。':'The local connection has not verified project reading tools. Update the helper and check again. Normal context remains available.') : '';
+    const checked=connectionState.checkedAt!==undefined?(zh?'最近检查：':'Last checked: ')+new Date(connectionState.checkedAt).toLocaleString():'';
+    connection.dataset.tooltip = [blockedDetail,connectionState.detail?.slice(0, 800),serviceDetail,checked, options.onReconnect && !disabled ? zh ? '点击重新检查连接' : 'Click to check the connection again' : ''].filter(Boolean).join('\n') || label;
     // Only meaningful settled transitions are announced. Spinner states and
     // changing retry details stay visual, so streaming updates cannot chatter.
-    if (['connected', 'offline', 'auth-required'].includes(state)) {
+    if (['connected', 'offline', 'auth-required','blocked'].includes(state)) {
       const announcement = `${assistantName()} · ${words[state]}`;
       if (announcedConnection !== announcement) { announcedConnection = announcement; connectionAnnouncement.textContent = announcement; }
     }

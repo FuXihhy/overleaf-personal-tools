@@ -8,6 +8,9 @@ const KEY='opt:project-cache-lifecycle:v1';
 const scope={projectId:'0123456789abcdef01234567',accountId:'abcdef0123456789abcdef01'};
 const url=`https://www.overleaf.com/project/${scope.projectId}`;
 const token=()=>crypto.randomUUID();
+// Chromium's real DocumentId representation is a 32-character hex token.
+// Extension-owned lease/browser IDs separately use crypto.randomUUID().
+const chromeDocument=()=>token().replaceAll('-','').toUpperCase();
 function event() {
   const listeners=new Set<(...args:any[])=>any>();
   return {listeners,addListener:vi.fn((fn:(...args:any[])=>any)=>listeners.add(fn)),removeListener:vi.fn((fn:(...args:any[])=>any)=>listeners.delete(fn)),emit:(...args:any[])=>[...listeners].map(fn=>fn(...args))};
@@ -27,7 +30,7 @@ function fixture() {
   const alarms={create:vi.fn(async()=>{}),onAlarm:event()};
   const api={runtime,storage,tabs,alarms} as unknown as ConstructorParameters<typeof ProjectCacheCoordinator>[0];
   const coordinator=new ProjectCacheCoordinator(api);
-  const sender=(id:number,documentId:string=token(),pageUrl=url)=>({id:runtime.id,frameId:0,tab:{id},documentId,url:pageUrl} as chrome.runtime.MessageSender);
+  const sender=(id:number,documentId:string=chromeDocument(),pageUrl=url)=>({id:runtime.id,frameId:0,tab:{id},documentId,url:pageUrl} as chrome.runtime.MessageSender);
   return {data,calls,order,native,runtime,storage,tabs,alarms,ports,api,coordinator,sender};
 }
 const queued=(id=token(),snapshotId='ab'.repeat(32))=>({id,prompt:{snapshotId}});
@@ -90,8 +93,68 @@ describe('durable browser project cache lifecycle',()=>{
     await expect(f.coordinator.acquire(sender,scope,old)).rejects.toThrow('newer cache lease');
   });
   it('rejects unverified document identity and corrupt durable metadata without deleting anything',async()=>{
-    const f=fixture();await expect(f.coordinator.acquire(f.sender(1,'not-a-chrome-document'),scope,token())).rejects.toThrow('verified Chrome');
+    const f=fixture();await expect(f.coordinator.acquire({...f.sender(1),documentId:undefined},scope,token())).rejects.toThrow('[document_missing]');
     f.data[KEY]={version:1,pages:[]};await expect(f.coordinator.sweep()).rejects.toThrow('metadata is invalid');expect(f.calls).toEqual([]);
+  });
+  it.each([chromeDocument(),token(),'opaque.browser-document:revision/2'])('uses trusted Chrome document identity without assuming UUID punctuation (%s)',async documentId=>{
+    const f=fixture(),sender=f.sender(1,documentId),lease=token();
+    const first=await f.coordinator.acquire(sender,scope,lease);
+    const restored=await new ProjectCacheCoordinator(f.api).acquire(sender,scope,lease);
+    expect(first.documentId).toMatch(/^doc:[a-f\d]{64}$/);expect(restored.documentId).toBe(first.documentId);
+    expect(f.calls.find(r=>r.op==='source-page-acquire')).toMatchObject({documentId:first.documentId,leaseToken:lease,...scope});
+    expect(f.data[KEY].pages).toHaveLength(1);
+  });
+  it('keeps browser document identities distinct across navigation and tabs',async()=>{
+    const f=fixture(),documentId=chromeDocument();
+    const first=await f.coordinator.acquire(f.sender(1,documentId),scope,token());
+    const otherTab=await f.coordinator.acquire(f.sender(2,documentId),scope,token());
+    const navigated=await f.coordinator.acquire(f.sender(1,chromeDocument()),scope,token());
+    expect(new Set([first.documentId,otherTab.documentId,navigated.documentId]).size).toBe(3);
+  });
+  it('preserves an existing raw identity across a worker upgrade and retires it after verified document replacement',async()=>{
+    const f=fixture(),raw=token(),lease=token(),legacy=`1:${raw}`;
+    f.data[KEY]={version:1,browserId:token(),pages:[{...scope,tabId:1,documentId:legacy,leaseToken:lease}],scopes:[scope],departures:[],releases:[],attempts:0};
+    const same=await f.coordinator.acquire(f.sender(1,raw),scope,lease);
+    expect(same.documentId).toBe(legacy);expect(f.data[KEY].pages).toHaveLength(1);
+    expect(f.calls.find(r=>r.op==='source-page-acquire')).toMatchObject({documentId:legacy,leaseToken:lease});
+    const replacement=await f.coordinator.acquire(f.sender(1,chromeDocument()),scope,token());
+    expect(replacement.documentId).toMatch(/^doc:[a-f\d]{64}$/);expect(f.data[KEY].pages).toHaveLength(2);
+    f.tabs.query.mockResolvedValue([{id:1,url}]);f.tabs.sendMessage.mockResolvedValue(replacement);
+    await f.coordinator.reconcile();
+    expect(f.calls.find(r=>r.op==='source-page-reconcile')).toMatchObject({documents:[replacement.documentId],inventoryComplete:true});
+    expect(f.data[KEY].pages).toEqual([expect.objectContaining({documentId:replacement.documentId})]);
+  });
+  it('keeps native BFCache predecessor fencing on an existing raw identity during upgrade',async()=>{
+    const f=fixture(),raw=token(),previous=token(),lease=token(),legacy=`1:${raw}`;
+    f.data[KEY]={version:1,browserId:token(),pages:[{...scope,tabId:1,documentId:legacy,leaseToken:previous}],scopes:[scope],departures:[],releases:[],attempts:0};
+    await f.coordinator.acquire(f.sender(1,raw),scope,lease,previous);
+    expect(f.data[KEY].pages).toHaveLength(1);expect(f.data[KEY].pages[0]).toMatchObject({documentId:legacy,leaseToken:lease});
+    expect(f.calls.find(r=>r.op==='source-page-acquire')).toMatchObject({documentId:legacy,leaseToken:lease,previousLeaseToken:previous});
+    expect(f.calls.some(r=>r.op==='source-page-release')).toBe(false);
+  });
+  it.each([`${url}?layout=flat&file=private.tex#editor`,`${url}/#editor`,url.replace('www.','cn.')])('matches the project pathname independently of query and fragment',async pageUrl=>{
+    const f=fixture();await expect(f.coordinator.acquire(f.sender(1,chromeDocument(),pageUrl),scope,token())).resolves.toMatchObject({ok:true});
+  });
+  it.each([
+    [{documentId:undefined},'document_missing'],[{documentId:''},'document_missing'],[{documentId:'unsafe\nvalue'},'document_invalid'],[{documentId:'a'.repeat(1025)},'document_invalid'],
+    [{frameId:undefined},'frame_missing'],[{frameId:1},'frame_not_top'],[{tab:{id:-1}},'tab_invalid'],[{tab:undefined},'tab_invalid'],
+    [{id:'another-extension'},'sender_extension'],[{url:undefined},'sender_url'],[{origin:'https://evil.example'},'sender_origin'],
+    [{url:'https://www.overleaf.com/project/111111111111111111111111'},'project_mismatch'],
+    [{url:'https://www.overleaf.com.evil.example/project/'+scope.projectId},'sender_url'],
+    [{url:'https://private:secret@www.overleaf.com/project/'+scope.projectId},'sender_url'],
+  ])('rejects unverified sender evidence with a value-free diagnostic (%j)',async(changes,reason)=>{
+    const f=fixture(),sender={...f.sender(1),...changes} as chrome.runtime.MessageSender;
+    let message='';try{await f.coordinator.acquire(sender,scope,token());}catch(error){message=String(error);}
+    expect(message).toContain(`[${reason}]`);expect(message).not.toContain(scope.accountId);expect(message).not.toContain(scope.projectId);
+    expect(message).not.toContain('private:secret');expect(message).not.toContain('unsafe\nvalue');
+    expect(f.calls).toEqual([]);expect(f.storage.set).not.toHaveBeenCalled();
+  });
+  it('does not substitute a tab URL or payload document ID for missing Chrome sender evidence',async()=>{
+    const f=fixture();await expect(f.coordinator.acquire({...f.sender(1),url:undefined,tab:{id:1,url}} as chrome.runtime.MessageSender,scope,token())).rejects.toThrow('[sender_url]');
+    registerProjectCacheLifecycle(f.api,()=>true);
+    const respond=vi.fn();f.runtime.onMessage.emit({type:'opt:cache-page',...scope,leaseToken:token(),documentId:chromeDocument()},f.sender(1),respond);
+    expect(respond).toHaveBeenCalledWith({ok:false,message:expect.stringContaining('[request_or_sender_invalid]')});
+    expect(f.calls.some(r=>r.op==='source-page-acquire')).toBe(false);
   });
   it('pins before durable queue storage and releases removed references only after the write',async()=>{
     const f=fixture(),a=queued(),b=queued();await f.coordinator.queueWrite(scope,[],[a],async()=>{f.order.push('persist A');});

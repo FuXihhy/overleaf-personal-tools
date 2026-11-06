@@ -26,7 +26,7 @@ import { CodexCatalogue } from './codex/catalogue';
 import { DEFAULT_CODEX_SETTINGS, codexCacheMode, isCodexSelection, sourcePath, validateCodexSettings, type CodexAnswerQuote, type CodexMessage, type CodexSelection, type CodexCacheInfo } from './codex/types';
 import { createProjectCachePage } from './codex/cache-lifecycle';
 import { codexStorageKey, loadCodexSettings, saveCodexSettings, saveCodexDefaults, loadCodexMessages, saveCodexMessages, loadCodexPanelPosition, saveCodexPanelPosition, loadCodexClickToCopy, saveCodexClickToCopy, loadCodexCopyToast, saveCodexCopyToast, loadCodexBusyMessageBehavior, saveCodexBusyMessageBehavior } from './codex/storage';
-import type { CodexEvent } from './codex/types';
+import type { CodexEvent, CodexSettings } from './codex/types';
 import { syncCodexProjectSource, type CodexProjectSnapshot } from './codex/context';
 import { CodexSourceGuard } from './codex/source-guard';
 import { CodexCacheFreshness } from './codex/cache-freshness';
@@ -50,12 +50,13 @@ async function start() {
   const provider = () => model.codex?.providerId;
   const requestCodex: CodexClient['request'] = async (...args) => {
     const [op,data,onEvent]=args;
+    const requestProvider=provider();
     try {
       if(readOverleafAccount()!==accountId)throw new Error('The Overleaf account changed. Refresh this project page before continuing.');
       if (op === 'provider-list' || op.startsWith('source-') || !provider()) return await codexClient.request(...args);
       const scoped={...data,providerId:provider()};
       return await (onEvent ? codexClient.request(op,scoped,onEvent) : codexClient.request(op,scoped));
-    } catch(error) { if(op!=='status' && op!=='provider-list')codexCatalogue.reportFailure(error); throw error; }
+    } catch(error) { if(context.alive()&&requestProvider===provider()&&op!=='status' && op!=='provider-list')codexCatalogue.reportFailure(error); throw error; }
   };
   const loadAssistantMessages = () => provider() ? loadCodexMessages(projectId,accountId,provider()) : loadCodexMessages(projectId,accountId);
   const saveAssistantMessages = (messages: CodexMessage[]) => provider() ? saveCodexMessages(projectId,accountId,messages,provider()) : saveCodexMessages(projectId,accountId,messages);
@@ -92,13 +93,17 @@ async function start() {
   let indexSignature = '';
   let rebuildTimer: ReturnType<typeof setTimeout>;
   const liveDocuments = new Map<string, string>();
-  let cacheReadError=false, cachePossiblyStale=false, cacheSavedOnly=false;
+  let cacheReadError=false, cachePossiblyStale=false, cacheSavedOnly=false, cacheFailureRevision=0;
+  let projectReaderIssue:string|undefined;
   function refreshCacheNotice(){
     if(!context.alive())return;
     codexPanel.setCacheNotice(model.codex?.enabled && model.codex.contextMode==='project'
       ? cacheReadError?'error':cacheSavedOnly?'saved':cachePossiblyStale?'stale':null : null);
   }
-  function cacheFailure(){cacheReadError=true;refreshCacheNotice();}
+  function cacheFailure(){++cacheFailureRevision;cacheReadError=true;refreshCacheNotice();}
+  function requireProjectReader(settings:CodexSettings){
+    if(settings.contextMode==='project'&&!settings.providerId&&projectReaderIssue)throw new Error(projectReaderIssue);
+  }
   function describeCache(info:CodexCacheInfo){
     const when=info.lastSyncedAt?new Date(info.lastSyncedAt*1000).toLocaleString():'—';
     return codexText(`本机源码：${info.snapshotCount} 个版本，${info.totalBytes} 字节。临时 ${info.temporaryCount}，保留 ${info.persistentCount}，旧版保留 ${info.legacyCount}。页面 ${info.pageCount}，受保护任务 ${info.pinCount}。\n最近同步：${when}\n只读镜像：${info.folder||'无'}${info.cleanupPending?'\n清理将在保护条件解除后进行。':''}`,
@@ -125,14 +130,19 @@ async function start() {
     // Sequential upload acknowledgements leave room for the active answer and
     // history/status requests on the shared native port, including while queuing.
     const operation = projectSourceSync.then(async () => {
+      const failureRevision=cacheFailureRevision;
       if (!current()) throw new Error(codexText('对话已改变，项目同步已取消。', 'The conversation changed; project synchronization was cancelled.'));
       if(!background)codexPanel.setStatus(codexText('正在同步完整项目…', 'Syncing the complete project…'));
-      const lease=await cachePage.acquire();
+      let lease:Awaited<ReturnType<typeof cachePage.acquire>>;
+      try{lease=await cachePage.acquire();}catch(error){if(current())codexCatalogue.reportFailure(error);throw error;}
+      if(!current())throw new Error(codexText('项目同步已取消。','Project synchronization was cancelled.'));
       const cacheMode=codexCacheMode(model.codex);
       if(cacheMode==='normal')throw new Error(codexText('普通上下文不下载完整项目。','Normal context does not download the complete project.'));
       const full = await source.captureFull({ liveDocuments: documents, signal: context.signal });
       const result=await syncCodexProjectSource(full, (op, data) => requestCodex(op, op==='source-begin'?{...data,cacheMode,leaseToken:lease.leaseToken}:data), current);
-      cacheReadError=false;cacheSavedOnly=!!(activePath || document.querySelector('.cm-editor')) && !documents.size;cacheFreshness.synced(full.files,captureRevision);refreshCacheNotice();
+      if(!current()||readOverleafAccount()!==accountId)throw new Error(codexText('项目页面已改变，旧同步结果不再适用。','The project page changed; the old synchronization result no longer applies.'));
+      if(failureRevision===cacheFailureRevision)cacheReadError=false;
+      cacheSavedOnly=!!(activePath || document.querySelector('.cm-editor')) && !documents.size;cacheFreshness.synced(full.files,captureRevision);refreshCacheNotice();
       return result;
     });
     projectSourceSync = operation.then(() => {}, () => {});
@@ -146,7 +156,7 @@ async function start() {
       check:async()=>{
         let unavailable=false;
         try {
-          const event=await codexClient.request('source-check',{snapshotId},event=>{if(event.type==='error' && event.errorCode==='source_unavailable')unavailable=true;});
+          const event=await requestCodex('source-check',{snapshotId},event=>{if(event.type==='error' && event.errorCode==='source_unavailable')unavailable=true;});
           if(event.type!=='source' || event.snapshotId!==snapshotId)throw new Error('The local connection could not verify this project cache. Update the local connection.');
           return true;
         }catch(error){if(current())cacheFailure();if(unavailable)return false;throw error;}
@@ -193,8 +203,8 @@ async function start() {
     },
     async onSyncProjectCache() {
       if(!context.alive() || !codexReady || !model.codex?.enabled || model.codex.contextMode!=='project')throw new Error(codexText('请先启用完整项目上下文。','Enable complete project context first.'));
-      const generation=codexGeneration;
-      const result=await captureProjectSnapshot(()=>context.alive() && generation===codexGeneration,true);
+      const generation=codexGeneration,mode=codexCacheMode(model.codex);
+      const result=await captureProjectSnapshot(()=>context.alive() && generation===codexGeneration && !!model.codex?.enabled && mode===codexCacheMode(model.codex),true);
       const changed=result.uploadedFileCount??result.fileCount;
       return codexText(`项目缓存已同步：${result.fileCount} 个文件，上传 ${changed} 个，其余复用本机缓存。`,`Project cache synced: ${result.fileCount} files; ${changed} uploaded, the rest reused locally.`);
     },
@@ -347,13 +357,17 @@ async function start() {
     () => codexSending || codexHistoryBusy || !!historySync?.busy,
     state => {
       if (!context.alive()) return;
+      if(state.connection==='unknown')projectReaderIssue=undefined;
+      if(state.connection==='connected')projectReaderIssue=provider()||state.projectReaderReady===true?undefined:state.readerError||codexText('本机连接尚未验证项目读取工具。请更新辅助程序并重新检查；普通上下文仍可使用。','The local connection has not verified project reading tools. Update the helper and check again; Normal context remains available.');
       model.codexModels = state.models;
       model.codexModelsLoading = state.loading;
       model.codexModelsError = state.error ? codexError(new Error(state.error)) : undefined;
+      const projectIssue=model.codex?.contextMode==='project'?(cacheReadError?codexText('项目同步失败。请同步项目缓存后重试；本机后台检查不能替代项目同步。','Project synchronization failed. Sync the project cache before retrying; checking the local service does not synchronize the project.'):projectReaderIssue):undefined;
       model.codexStatus = state.loading
         ? codexText('正在读取模型连接…', 'Loading model connection…')
-        : model.codexModelsError || state.message || codexText('Codex 已连接。', 'Codex connected.');
-      codexPanel.setConnection({state:state.connection ?? 'unknown', message:state.error ? connectionSummary(state.error)+(state.connection==='reconnecting'?codexText(' · 重连中…',' · Reconnecting…'):'') : undefined, detail:state.diagnostic || state.error});
+        : model.codexModelsError || projectIssue || (provider()?state.message:state.connection==='connected'?codexText('本机 Codex 后台已检查；模型调用尚未通过本次检查验证。','The local Codex service was checked; this check did not verify a model inference request.'):undefined) || '';
+      codexPanel.setConnection({state:state.connection ?? 'unknown', message:state.error ? connectionSummary(state.error)+(state.connection==='reconnecting'?codexText(' · 重连中…',' · Reconnecting…'):'') : undefined, detail:state.diagnostic || state.error,
+        connectionKind:state.connectionKind,projectReaderReady:state.projectReaderReady,readerError:state.readerError,checkedAt:state.checkedAt});
       ui.update();
     },
     Date.now,
@@ -368,7 +382,7 @@ async function start() {
   function codexError(error: unknown): string {
     const message = error instanceof Error ? error.message : String(error);
     if (/workspace (?:routing discovery|connection) timed out|account.*(?:discovery|connection|routing).*timed out/i.test(message)) return codexText('Codex 账号连接超时；恢复连接后即可加载模型列表。','Codex account connection timed out. Models will load when the connection recovers.');
-    if (/native messaging host.*not found|specified native messaging host|not registered/i.test(message)) return codexText('本机 Codex 连接程序未安装。请完成扩展配套安装后重试。', 'The local Codex helper is not installed. Complete the companion installation and try again.');
+    if (/native messaging host.*not found|specified native messaging host|(?:native (?:messaging )?host|(?:local )?Codex helper).*not registered/i.test(message)) return codexText('本机 Codex 连接程序未安装。请完成扩展配套安装后重试。', 'The local Codex helper is not installed. Complete the companion installation and try again.');
     if (/Codex is still holding this conversation/i.test(message)) return codexText('Codex 桌面仍占用这个对话。历史会继续同步；目前请在 Codex 续聊，或等待它释放会话后再从这里发送。', message);
     if (/New messages arrived from Codex/i.test(message)) return codexText('Codex 中有新消息。请等待对话同步后再发送，输入的问题已保留。', message);
     return message.slice(0, 1500);
@@ -509,6 +523,7 @@ async function start() {
           sourceGuards.add(guard);await guard.ensure();guard.start();
         }
         if (!context.alive() || generation !== codexGeneration || codexCancelled) return;
+        requireProjectReader(settings);
         codexPanel.setStatus(note || (provider() ? codexText('正在思考…','Thinking…') : codexText('Codex 正在思考…', 'Codex is thinking…')));
         codexNativePending = true;
         submitted = true;
@@ -532,7 +547,7 @@ async function start() {
             codexMessages = rollbackMessages;
             codexPanel.setMessages(codexMessages);
           }
-          model.codexStatus = codexError(error); codexPanel.setStatus(model.codexStatus); throw new Error(model.codexStatus);
+          model.codexStatus = codexError(error)+(submitted?'':codexText(' 问题尚未发送，草稿与引用已保留。',' The question was not sent. Your draft and quotations were kept.')); codexPanel.setStatus(model.codexStatus); throw new Error(model.codexStatus);
         }
       } finally {
         for(const guard of sourceGuards)guard.stop();sourceGuards.clear();
@@ -606,6 +621,7 @@ async function start() {
         sourceGuards.add(sourceGuard);await sourceGuard.ensure();
       }
       if(!codexSending || turnId!==activeTurnId || conversationId!==activeConversationId || !activeCanSteer)throw new Error(codexText('这一轮已结束，补充内容尚未发送。请使用排队或发送。','The turn ended. Your addition was not sent; queue or send it instead.'));
+      requireProjectReader(prompt.settings);
       onSubmit?.();
       const result=await requestCodex('steer',{question:prompt.question,selection:prompt.selection,answerQuote:prompt.answerQuote,files:prompt.files,...(prompt.snapshotId?{snapshotId:prompt.snapshotId}:{}),settings:prompt.settings,expectedConversationId:conversationId,expectedTurnId:turnId});
       if(!context.alive())return;

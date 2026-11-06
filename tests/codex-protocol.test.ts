@@ -6,6 +6,12 @@ const selection = { path: 'chapter/notes.tex', text: 'x=0', from: 12, to: 15, st
 const ask = () => ({ version: 1, id: 'request-1', op: 'ask', projectId, question: 'Why does this vanish?', selection: { ...selection }, settings: { ...DEFAULT_CODEX_SETTINGS }, files: [{ path: 'chapter/notes.tex', content: 'Assume x=0.' }] });
 
 describe('Codex messages crossing extension/native boundaries', () => {
+  it('accepts status evidence for the independent service and separately verified project reader',()=>{
+    const status={id:'status',type:'status',available:true,authenticated:true,connectionKind:'standalone',projectReaderReady:false,readerError:'Missing manuscript tools'};
+    expect(parseCodexEvent(status)).toEqual(status);
+    expect(parseCodexEvent({id:'status',type:'status',available:true})).not.toHaveProperty('projectReaderReady');
+    for(const change of [{connectionKind:'desktop'},{connectionKind:true},{projectReaderReady:'yes'},{readerError:5},{readerError:'x'.repeat(4001)},{type:'done'}])expect(parseCodexEvent({...status,...change})).toBeUndefined();
+  });
   it('defaults new project source to on-demand while preserving legacy settings and selection scope',()=>{
     expect(codexCacheMode(DEFAULT_CODEX_SETTINGS)).toBe('on-demand');
     expect(validateCodexSettings(DEFAULT_CODEX_SETTINGS)).not.toHaveProperty('cacheMode');

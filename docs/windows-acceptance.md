@@ -1,5 +1,7 @@
 # Windows 开发版验收记录
 
+以下记录对应 0.12.15。后续真实页面反馈发现连接提示与页面身份格式的遗漏，0.12.16 修复及交互验收进展见 [连接修复记录](windows-connection-acceptance.md)；不能把此处旧版基础连通确认解释为完整交互通过。
+
 验证日期：2026-11-06。当前设备 `FUXI-LENOVO`，工作目录 `E:\Learning\Code\Overleaf\overleaf-personal-tools`，分支 `windows/install-and-compat-20261106`。用户已确认在这台设备继续。基线是私有仓库 v0.12.14、提交 `0803251324c32a2f213f39a4ece7ddac264ab126`；本地源码构建为 `0.12.15 Windows development`，固定扩展 ID 为 `pffppbkokpnfafpechmlambifflkmbbn`。没有用发布 ZIP 安装，因此不声称验证过发布 ZIP 的哈希。
 
 ## 环境与安装

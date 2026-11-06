@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.12.16 Windows development — 2026-11-06（独立开发分支，未发布）
+
+- 修复真实 Chrome 的 32 位 documentId 被 36 位 UUID 校验拒绝、导致完整项目无法同步的问题。页面身份仍由可信 Chrome sender、顶层 frame、tab 和项目域名共同验证，并兼容已有页面租约。
+- 连接检查明确区分独立本机 Codex 后台、项目读取工具和页面缓存状态；检查工具目录，不把登录信息与模型列表成功表述成实际推理或桌面连接成功。
+- 项目同步失败时显示发送前置条件受阻，旧状态检查结果及关闭提示不会恢复成功标志；保留草稿与引用，不自动重发问题。
+
 ## 0.12.15 Windows development — 2026-11-06（独立开发分支，未发布）
 
 - 新增当前用户 Native Messaging 注册和可重复安装；固定扩展身份保留。Windows 数据放在用户目录 `.overleaf-personal-tools`，避免 MSIX LocalAppData 重定向。启动器处理 UTF-8 路径；缺失 manifest 的卸载仍清理仅属于本安装的注册值。

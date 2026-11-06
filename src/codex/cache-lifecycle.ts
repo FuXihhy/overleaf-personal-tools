@@ -9,8 +9,32 @@ type Page = Scope & {tabId: number; documentId: string; leaseToken: string};
 type State = {version: 1; browserId: string; pages: Page[]; scopes: Scope[]; departures: Page[]; releases: Array<Scope & {queueId: string}>; attempts: number};
 const scopeKey = (scope: Scope) => `${scope.accountId}:${scope.projectId}`;
 const project = (url?: string) => {
-  try { const u = new URL(url!); return /^https:\/\/(www|cn)\.overleaf\.com$/.test(u.origin) ? /^\/project\/([a-f\d]{24})\/?$/i.exec(u.pathname)?.[1] : undefined; } catch { return; }
+  try { const u = new URL(url!); return !u.username && !u.password && /^https:\/\/(www|cn)\.overleaf\.com$/.test(u.origin) ? /^\/project\/([a-f\d]{24})\/?$/i.exec(u.pathname)?.[1] : undefined; } catch { return; }
 };
+
+// Chrome owns MessageSender.documentId. Its API calls this a UUID, but Chromium
+// serializes DocumentId as 32 hex characters, not crypto.randomUUID()'s layout:
+// https://chromium.googlesource.com/chromium/src/+/refs/heads/main/extensions/browser/extension_api_frame_id_map.cc
+// Treat it as opaque browser evidence. Hash its exact spelling with the tab ID
+// to fit the native identity alphabet without accepting a page-supplied ID.
+async function verifiedDocument(sender: chrome.runtime.MessageSender, extensionId: string, scope: Scope): Promise<string> {
+  function reject(reason: string): never { throw new Error(`A verified Chrome project document is required for project caching [${reason}]. Reload the Overleaf project page and retry.`); }
+  if (!extensionId || sender.id !== extensionId) reject('sender_extension');
+  if (sender.frameId !== 0) reject(sender.frameId === undefined ? 'frame_missing' : 'frame_not_top');
+  if (!Number.isSafeInteger(sender.tab?.id) || sender.tab!.id! < 0) reject('tab_invalid');
+  if (typeof sender.documentId !== 'string' || !sender.documentId) reject('document_missing');
+  if (sender.documentId.length > 1024 || /[\u0000-\u001f\u007f]/.test(sender.documentId)) reject('document_invalid');
+  if (!hex24(scope.projectId) || !hex24(scope.accountId)) reject('scope_invalid');
+  const sourceProject = project(sender.url);
+  if (!sourceProject) reject('sender_url');
+  if (sourceProject.toLowerCase() !== scope.projectId.toLowerCase()) reject('project_mismatch');
+  if (sender.origin !== undefined && sender.origin !== new URL(sender.url!).origin) reject('sender_origin');
+  // No fallback to sender.tab.url or to a documentId supplied in the payload:
+  // those can describe a different document during navigation.
+  const encoded = new TextEncoder().encode(JSON.stringify([sender.tab!.id, sender.documentId]));
+  const digest = await crypto.subtle.digest('SHA-256', encoded);
+  return `doc:${Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')}`;
+}
 
 /** Browser evidence owns leases. A disconnected port, hidden page or sleeping
  * service worker never proves document departure. Every mutation is durable. */
@@ -54,10 +78,18 @@ export class ProjectCacheCoordinator {
   }
   private schedule() { return this.api.alarms.create(ALARM,{delayInMinutes:.5}); }
   async acquire(sender: chrome.runtime.MessageSender, scope: Scope, leaseToken: string, previousLeaseToken?:string) {
-    if (!uuid(leaseToken) || previousLeaseToken!==undefined&&!uuid(previousLeaseToken) || !uuid(sender.documentId) || !Number.isInteger(sender.tab?.id) || !hex24(scope.accountId) || project(sender.url)!==scope.projectId) throw new Error('A verified Chrome project document is required for project caching.');
-    const page: Page={...scope,tabId:sender.tab!.id!,documentId:`${sender.tab!.id}:${sender.documentId}`,leaseToken};
+    if (!uuid(leaseToken) || previousLeaseToken!==undefined&&!uuid(previousLeaseToken)) throw new Error('Invalid project cache lease [lease_invalid].');
+    const documentId = await verifiedDocument(sender, this.api.runtime.id, scope);
+    const page: Page={...scope,tabId:sender.tab!.id!,documentId,leaseToken};
     return this.serial(async()=>{
       const state=await this.load();this.remember(state,scope);
+      // A worker can update while its old content script keeps the same lease.
+      // Preserve an already-registered raw identity for that exact generation;
+      // native cannot rebind its token to the new hash. Fresh documents use the
+      // hash and a complete inventory retires the old identity normally.
+      const legacyDocumentId=`${sender.tab!.id}:${sender.documentId}`;
+      if(state.pages.some(p=>p.documentId===legacyDocumentId&&p.tabId===page.tabId
+        &&(p.leaseToken===leaseToken||p.leaseToken===previousLeaseToken)))page.documentId=legacyDocumentId;
       const existing=state.pages.find(p=>p.documentId===page.documentId && scopeKey(p)===scopeKey(page));
       if(existing && existing.leaseToken!==leaseToken){
         if(existing.leaseToken!==previousLeaseToken)throw new Error('This document already registered a newer cache lease.');
@@ -162,7 +194,7 @@ export function registerProjectCacheLifecycle(api: ConstructorParameters<typeof 
   api.runtime.onMessage.addListener((raw,sender,respond)=>{
     const data=record(raw);if(data?.type!=='opt:cache-page')return;
     if(!allowed(sender,api.runtime.id)||!hex24(data.projectId)||!hex24(data.accountId)||!uuid(data.leaseToken)||data.previousLeaseToken!==undefined&&!uuid(data.previousLeaseToken)
-      ||Object.keys(data).some(key=>!['type','projectId','accountId','leaseToken','previousLeaseToken'].includes(key))){respond({ok:false,message:'Invalid project cache page.'});return false;}
+      ||Object.keys(data).some(key=>!['type','projectId','accountId','leaseToken','previousLeaseToken'].includes(key))){respond({ok:false,message:'Invalid project cache page [request_or_sender_invalid].'});return false;}
     void coordinator.acquire(sender,{projectId:data.projectId,accountId:data.accountId},data.leaseToken,data.previousLeaseToken as string|undefined).then(respond,error=>respond({ok:false,message:String(error)}));return true;
   });
   api.tabs.onRemoved.addListener(tabId=>{void coordinator.departed(tabId).catch(()=>{});});

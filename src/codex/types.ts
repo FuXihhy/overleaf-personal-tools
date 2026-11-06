@@ -77,6 +77,9 @@ export interface CodexEvent {
   errorCode?: string;
   retryable?: boolean;
   diagnostic?: string;
+  connectionKind?: 'standalone';
+  projectReaderReady?: boolean;
+  readerError?: string;
   models?: CodexModel[];
   profiles?: APIProfile[];
   conversations?: CodexConversation[];
@@ -233,6 +236,9 @@ export function parseCodexEvent(value: unknown): CodexEvent | undefined {
   const r = record(value);
   if (!r || typeof r.id !== 'string' || !/^[\w-]{1,100}$/.test(r.id) || !['profiles','status','started','steered','delta','done','error','history','source'].includes(String(r.type))) return;
   const event: CodexEvent = { id: r.id, type: r.type as CodexEvent['type'] };
+  if(r.connectionKind!==undefined){if(r.type!=='status'||r.connectionKind!=='standalone')return;event.connectionKind='standalone';}
+  if(r.projectReaderReady!==undefined){if(r.type!=='status'||typeof r.projectReaderReady!=='boolean')return;event.projectReaderReady=r.projectReaderReady;}
+  if(r.readerError!==undefined){if(r.type!=='status'||typeof r.readerError!=='string'||r.readerError.length>4000)return;event.readerError=r.readerError;}
   if (r.cacheInfo !== undefined) {
     const c = record(r.cacheInfo);
     if (r.type !== 'source' || !c || !(c.folder === null || typeof c.folder === 'string' && c.folder.length <= 4096)

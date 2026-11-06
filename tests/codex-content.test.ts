@@ -117,13 +117,55 @@ describe('Codex content integration', () => {
     mocks.captureFull.mockRejectedValueOnce(new Error('Project export unavailable'));
     await expect(mocks.actions!.onSyncProjectCache!()).rejects.toThrow('Project export unavailable');
     expect(mocks.panel.setCacheNotice).toHaveBeenLastCalledWith('error');
-    mocks.request.mockResolvedValue({id:'status',type:'status',available:true,authenticated:true,models:[{id:'synthetic-model',displayName:'Synthetic'}]});
+    mocks.request.mockResolvedValue({id:'status',type:'status',available:true,authenticated:true,connectionKind:'standalone',projectReaderReady:true,models:[{id:'synthetic-model',displayName:'Synthetic'}]});
     await mocks.actions!.checkCodex!();
     expect(mocks.panel.setConnection).toHaveBeenLastCalledWith(expect.objectContaining({state:'connected'}));
     expect(mocks.panel.setCacheNotice).toHaveBeenLastCalledWith('error');
+    expect(mocks.model!().codexStatus).toContain('Project synchronization failed');
     await mocks.actions!.onSyncProjectCache!();
     expect(mocks.panel.setCacheNotice).toHaveBeenLastCalledWith(null);
     expect(mocks.request.mock.calls.some(([op])=>['ask','steer','new-chat'].includes(op))).toBe(false);
+  });
+  it('reports lease-connection failures before capture and never sends a question or replaces that failure with cached readiness',async()=>{
+    vi.useFakeTimers();await boot();
+    mocks.request.mockResolvedValue({id:'status',type:'status',available:true,authenticated:true,connectionKind:'standalone',projectReaderReady:true,models:[{id:'synthetic',displayName:'Synthetic'}]});
+    await mocks.actions!.checkCodex!();
+    mocks.acquireCachePage.mockRejectedValue(new Error('Project cache connection lost; source is retained.'));
+    await expect(mocks.panelOptions!.onSend('Keep the original question',selection)).rejects.toThrow('The question was not sent');
+    expect(mocks.captureFull).not.toHaveBeenCalled();expect(mocks.request.mock.calls.some(([op])=>op==='ask')).toBe(false);
+    expect(mocks.panel.setConnection).toHaveBeenLastCalledWith(expect.objectContaining({state:'reconnecting'}));
+    expect(mocks.panel.setCacheNotice).toHaveBeenLastCalledWith('error');
+    await mocks.actions!.checkCodex!();expect(mocks.model!().codexStatus).toContain('Project synchronization failed');
+    expect(mocks.panel.setMessages).toHaveBeenLastCalledWith([]);
+  });
+  it('propagates source-check transport errors to connection state without sending or retrying the question',async()=>{
+    vi.useFakeTimers();await boot();mocks.sourceCheck.mockRejectedValue(new Error('Codex request timed out. Try again.'));
+    await expect(mocks.panelOptions!.onSend('Retain this draft',selection)).rejects.toThrow('The question was not sent');
+    expect(mocks.panel.setConnection).toHaveBeenLastCalledWith(expect.objectContaining({state:'reconnecting'}));
+    expect(mocks.panel.setCacheNotice).toHaveBeenLastCalledWith('error');expect(mocks.request.mock.calls.some(([op])=>op==='ask')).toBe(false);
+  });
+  it.each([false,undefined])('retains model choices but refuses project sends when reader verification is %s; Normal context can continue',async projectReaderReady=>{
+    await boot();mocks.request.mockImplementation(async(op:string)=>op==='status'?{id:'status',type:'status',available:true,authenticated:true,connectionKind:'standalone',projectReaderReady,readerError:projectReaderReady===false?'Missing manuscript tools':undefined,models:[{id:'synthetic',displayName:'Synthetic'}]}:{id:'done',type:'done',text:'Synthetic response'});
+    await mocks.actions!.checkCodex!();expect(mocks.model!().codexModels).toHaveLength(1);
+    await expect(mocks.panelOptions!.onSend('Read the project',selection)).rejects.toThrow('The question was not sent');
+    expect(mocks.captureFull).toHaveBeenCalledOnce();expect(mocks.request.mock.calls.some(([op])=>op==='ask')).toBe(false);
+    await mocks.actions!.saveCodex!({...DEFAULT_CODEX_SETTINGS,contextMode:'selection',cacheMode:'normal'});
+    await mocks.panelOptions!.onSend('Explain only the selection',selection);
+    expect(mocks.request.mock.calls.filter(([op])=>op==='ask')).toHaveLength(1);expect(mocks.captureFull).toHaveBeenCalledOnce();
+  });
+  it('always performs a new status request for each completed manual check within five minutes',async()=>{
+    await boot();mocks.request.mockResolvedValue({id:'status',type:'status',available:true,authenticated:true,connectionKind:'standalone',projectReaderReady:true,models:[{id:'synthetic',displayName:'Synthetic'}]});
+    await mocks.actions!.checkCodex!();await mocks.actions!.checkCodex!();expect(mocks.request.mock.calls.filter(([op])=>op==='status')).toHaveLength(2);
+    expect(mocks.request.mock.calls.some(([op])=>['ask','steer'].includes(op))).toBe(false);
+  });
+  it.each(['normal','persistent'] as const)('retires a pending manual capture after switching its mode to %s without uploading under the old mode',async cacheMode=>{
+    await boot();mocks.captureFull.mockRejectedValueOnce(new Error('Original source failure'));
+    await expect(mocks.actions!.onSyncProjectCache!()).rejects.toThrow('Original source failure');
+    const full=deferred<{rootPath:string;files:Array<{path:string;content:string}>}>();mocks.captureFull.mockReturnValueOnce(full.promise);
+    const syncing=mocks.actions!.onSyncProjectCache!();const rejected=expect(syncing).rejects.toThrow('cancelled');await flush();
+    await mocks.actions!.saveCodex!({...DEFAULT_CODEX_SETTINGS,cacheMode,contextMode:cacheMode==='normal'?'selection':'project'});
+    full.resolve({rootPath:'main.tex',files:[{path:'main.tex',content:'Synthetic manuscript'}]});await rejected;
+    expect(mocks.sourceRequest).not.toHaveBeenCalled();expect(mocks.panel.setCacheNotice).toHaveBeenLastCalledWith(cacheMode==='normal'?null:'error');
   });
   it('does not mislabel an unrelated model request failure as a project cache error',async()=>{
     await boot();

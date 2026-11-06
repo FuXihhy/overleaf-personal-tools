@@ -58,7 +58,7 @@ describe('Codex Assistant in the Overleaf rail', () => {
     expect(document.querySelector('.opt-codex-selection-source')!.textContent).toBe(selection.text);
     input.value = 'A newer draft'; panel.setConnection({ state: 'connected' }); finish(); await flush();
     expect(badge.getAttribute('aria-disabled')).toBe('false'); expect(input.value).toBe('A newer draft');
-    expect(badge.textContent).toBe('Codex · Connected'); expect(send).not.toHaveBeenCalled();
+    expect(badge.textContent).toBe('Codex · Local service checked'); expect(send).not.toHaveBeenCalled();
   });
 
   it('keeps the connection visible while replying and announces only settled state changes', async () => {
@@ -69,7 +69,7 @@ describe('Codex Assistant in the Overleaf rail', () => {
     expect(badge.hidden).toBe(false); expect(badge.getAttribute('aria-disabled')).toBe('true');
     expect(announcement.getAttribute('aria-live')).toBe('polite'); expect(announcement.textContent).toBe('');
     expect(document.querySelector('.opt-codex-activity')!.textContent).toBe('Thinking…');
-    panel.setConnection({ state: 'connected' }); expect(announcement.textContent).toBe('Codex · Connected');
+    panel.setConnection({ state: 'connected' }); expect(announcement.textContent).toBe('Codex · Local service checked');
     const settledText = announcement.firstChild;
     panel.setConnection({ state: 'connected', detail: 'A newer check' }); panel.update();
     expect(announcement.firstChild).toBe(settledText);
@@ -85,6 +85,36 @@ describe('Codex Assistant in the Overleaf rail', () => {
     document.documentElement.lang = 'zh'; panel.update(); panel.setConnection({ state: 'auth-required' });
     expect(badge.textContent).toBe('DeepSeek · 请登录');
     expect(badge.getAttribute('aria-label')).toBe(badge.textContent);
+  });
+  it('describes the independent local service check without claiming desktop linkage or inference success',async()=>{
+    settings.contextMode='project';remount({onReconnect:vi.fn()});nativeRail();await flush();panel.open();
+    panel.setConnection({state:'connected',connectionKind:'standalone',projectReaderReady:true,checkedAt:1800000000000});
+    const badge=document.querySelector<HTMLButtonElement>('.opt-codex-connection')!;
+    expect(badge.textContent).toBe('Codex · Local service checked');expect(badge.dataset.tooltip).toContain('independent Codex CLI');
+    expect(badge.dataset.tooltip).toContain('does not depend on the Codex desktop window');expect(badge.dataset.tooltip).toContain('did not run model inference');expect(badge.dataset.tooltip).toContain('Last checked:');
+    settings.providerId='api';settings.providerName='Synthetic API';panel.update();panel.setConnection({state:'connected'});
+    expect(badge.textContent).toBe('Synthetic API · Connected');expect(badge.dataset.tooltip).not.toContain('Codex CLI');
+  });
+  it('keeps project synchronization visibly blocked after dismissal or later successful connection checks',async()=>{
+    settings.contextMode='project';remount({onReconnect:vi.fn()});nativeRail();await flush();panel.open();panel.setSelection(selection);
+    const input=document.querySelector<HTMLTextAreaElement>('#opt-codex-input')!;input.value='Preserve this draft';
+    const healthy={state:'connected' as const,connectionKind:'standalone' as const,projectReaderReady:true};panel.setConnection(healthy);panel.setCacheNotice('error');
+    const badge=document.querySelector<HTMLButtonElement>('.opt-codex-connection')!;
+    expect(badge.dataset.state).toBe('blocked');expect(badge.textContent).toBe('Codex · Project sync failed');
+    document.querySelector<HTMLButtonElement>('.opt-codex-cache-dismiss')!.click();panel.setConnection({...healthy,checkedAt:1800000000000});
+    expect(document.querySelector<HTMLElement>('.opt-codex-cache-notice')!.hidden).toBe(true);expect(badge.dataset.state).toBe('blocked');
+    expect(document.querySelector('.opt-codex-connection-announcement')!.textContent).toBe('Codex · Project sync failed');
+    expect(input.disabled).toBe(false);expect(input.value).toBe('Preserve this draft');expect(send).not.toHaveBeenCalled();
+    settings.contextMode='selection';panel.update();expect(badge.dataset.state).toBe('connected');
+    settings.contextMode='project';panel.update();expect(badge.dataset.state).toBe('blocked');
+    panel.setCacheNotice(null);expect(badge.dataset.state).toBe('connected');
+  });
+  it.each([false,undefined])('blocks unverified project reading (%s) while keeping Normal context available',async projectReaderReady=>{
+    settings.contextMode='project';nativeRail();await flush();panel.open();panel.setConnection({state:'connected',connectionKind:'standalone',projectReaderReady,readerError:projectReaderReady===false?'Missing manuscript tools':undefined});
+    const badge=document.querySelector<HTMLElement>('.opt-codex-connection')!;
+    expect(badge.dataset.state).toBe('blocked');expect(badge.textContent).toContain(projectReaderReady===false?'Project reader unavailable':'Project reader not verified');
+    settings.contextMode='selection';panel.update();expect(badge.dataset.state).toBe('connected');expect(document.querySelector<HTMLTextAreaElement>('#opt-codex-input')!.disabled).toBe(false);
+    settings.contextMode='project';panel.update();panel.setConnection({state:'connected',connectionKind:'standalone',projectReaderReady:true});expect(badge.dataset.state).toBe('connected');
   });
 
   it('reports reconnect failures without submitting or replacing the draft and ignores completion after disposal', async () => {

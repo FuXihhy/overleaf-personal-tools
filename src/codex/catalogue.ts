@@ -8,15 +8,21 @@ export interface CatalogueState {
   error?: string;
   message?: string;
   diagnostic?: string;
+  connectionKind?: CodexEvent['connectionKind'];
+  projectReaderReady?: boolean;
+  readerError?: string;
+  checkedAt?: number;
 }
 export function transientConnectionError(message: string): boolean {
-  return /workspace (?:routing discovery|connection) timed out|routing.*(?:timeout|timed out)|account\/read.*(?:timeout|timed out)|Codex request timed out|Codex did not respond|(?:connection|port|helper|process).*(?:disconnect|closed|interrupted)|receiving end does not exist|could not establish connection/i.test(message);
+  return /workspace (?:routing discovery|connection) timed out|routing.*(?:timeout|timed out)|account\/read.*(?:timeout|timed out)|Codex request timed out|Codex did not respond|Project cache coordination timed out|(?:connection|port|helper|process).*(?:disconnect|closed|interrupted|lost)|receiving end does not exist|could not establish connection/i.test(message);
 }
 /** Only read-only status discovery is retried. No questions or history writes
  * are replayed, and no catalogue survives an unsuccessful account check. */
 export class CodexCatalogue {
   private state: CatalogueState = { loading: false, connection: 'unknown' };
   private pending?: Promise<void>;
+  private forced?: Promise<void>;
+  private failureRevision = 0;
   private loadedAt?: number;
   private deferred = false;
   private retryTimer?: ReturnType<typeof setTimeout>;
@@ -31,7 +37,19 @@ export class CodexCatalogue {
     private readonly active: () => boolean = () => true,
   ) {}
   refresh(force = false, automatic = false): Promise<void> {
-    if (this.destroyed || this.pending) return this.pending ?? Promise.resolve();
+    if (this.destroyed) return Promise.resolve();
+    if (this.pending) {
+      if(!force)return this.pending;
+      // A manual check must observe failures that happened after an older
+      // discovery began. Coalesce forced clicks into one subsequent probe.
+      if(this.forced)return this.forced;
+      const generation=this.generation;
+      const forced=this.pending.then(()=>{
+        if(this.forced===forced)this.forced=undefined;
+        if(!this.destroyed&&generation===this.generation)return this.refresh(true,automatic);
+      }).finally(()=>{if(this.forced===forced)this.forced=undefined;});
+      this.forced=forced;return forced;
+    }
     if (!automatic) { this.clearRetry(); this.retries = 0; }
     if (!force && this.loadedAt !== undefined && this.now() - this.loadedAt < 300_000) return Promise.resolve();
     if (this.busy() || !this.active()) {
@@ -40,12 +58,12 @@ export class CodexCatalogue {
       return Promise.resolve();
     }
     this.deferred = false;
-    const generation = this.generation;
+    const generation = this.generation, failureRevision=this.failureRevision;
     this.publish({ ...this.state, loading: true, connection: automatic ? 'reconnecting' : 'checking', error: undefined });
     const operation = (async () => {
       try {
         const result = await Promise.resolve().then(() => this.request());
-        if (this.destroyed || generation !== this.generation) return;
+        if (this.destroyed || generation !== this.generation || failureRevision!==this.failureRevision) return;
         if (!result.available || !result.authenticated || !result.models?.length) {
           const error = result.message || 'Sign in to local Codex and try again.';
           const auth = result.errorCode === 'auth_required' || result.available === true && result.authenticated === false;
@@ -53,9 +71,10 @@ export class CodexCatalogue {
           return;
         }
         this.loadedAt = this.now(); this.retries = 0;
-        this.publish({ loading: false, connection: 'connected', models: result.models, message: result.message });
+        this.publish({ loading: false, connection: 'connected', models: result.models, message: result.message,
+          checkedAt:this.loadedAt,connectionKind:result.connectionKind,projectReaderReady:result.projectReaderReady,readerError:result.readerError });
       } catch (error) {
-        if (!this.destroyed && generation === this.generation) {
+        if (!this.destroyed && generation === this.generation && failureRevision===this.failureRevision) {
           const message = error instanceof Error ? error.message : String(error);
           this.fail(message, undefined, transientConnectionError(message));
         }
@@ -66,11 +85,14 @@ export class CodexCatalogue {
   }
   /** Surface transport failures from other operations without resending them. */
   reportFailure(error: unknown) {
-    if (this.destroyed || this.pending || this.retryTimer || this.state.connection === 'reconnecting') return;
+    if (this.destroyed) return;
     const message = error instanceof Error ? error.message : String(error);
-    if (/open Codex.*sign in|sign in.*Codex|authentication.*(?:required|expired)/i.test(message)) this.fail(message, undefined, false, true);
-    else if (/native.*(?:not found|not installed)|specified native messaging host|not registered/i.test(message)) this.fail(message);
-    else if (transientConnectionError(message)) this.fail(message, undefined, this.retries < 2);
+    const auth=/open Codex.*sign in|sign in.*Codex|authentication.*(?:required|expired)/i.test(message);
+    const unavailable=/native.*(?:not found|not installed)|specified native messaging host|(?:native (?:messaging )?host|(?:local )?Codex helper).*not registered/i.test(message);
+    const transient=transientConnectionError(message);
+    if(!auth&&!unavailable&&!transient)return;
+    ++this.failureRevision;this.clearRetry();
+    this.fail(message,undefined,!auth&&transient&&this.retries<2,auth);
   }
   private fail(error: string, diagnostic?: string, retryable = false, auth = false) {
     this.loadedAt = undefined;
@@ -85,9 +107,9 @@ export class CodexCatalogue {
     }, delay);
   }
   private clearRetry() { if (this.retryTimer) clearTimeout(this.retryTimer); this.retryTimer = undefined; }
-  reset() { this.generation++; this.pending = undefined; this.clearRetry(); this.retries = 0; this.loadedAt = undefined; this.deferred = false; this.publish({loading:false,connection:'unknown'}); }
+  reset() { this.generation++; this.pending = this.forced = undefined; this.clearRetry(); this.retries = 0; this.loadedAt = undefined; this.deferred = false; this.publish({loading:false,connection:'unknown'}); }
   destroy() { this.reset(); this.destroyed = true; }
-  whenIdle(): Promise<void> { return this.pending ?? Promise.resolve(); }
+  whenIdle(): Promise<void> { return this.forced ?? this.pending ?? Promise.resolve(); }
   resume() { if (this.deferred && !this.busy() && this.active()) void this.refresh(true, true); }
   private publish(state: CatalogueState) { this.state = state; this.changed(state); }
 }

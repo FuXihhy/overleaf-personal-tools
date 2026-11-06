@@ -1,6 +1,6 @@
 # Overleaf Personal Tools
 
-**0.12.15 Windows 开发分支（2026-11-06）**：本分支已实现 Windows helper、Native Messaging 注册、私有 ACL/文件锁、Codex Desktop named pipe、本机 TeX AppContainer，以及普通、按需和本地保留三种项目缓存模式。安装与更新见 [Windows 开发版说明](docs/windows-development.md)，实际测试、用户确认和未验收项见 [Windows 验收记录](docs/windows-acceptance.md)。以下旧版本说明保留原功能背景，不能作为 Windows 已验收的证据。
+**0.12.16 Windows 开发分支（2026-11-06）**：本分支已实现 Windows helper、Native Messaging 注册、私有 ACL/文件锁、Codex Desktop named pipe、本机 TeX AppContainer，以及普通、按需和本地保留三种项目缓存模式。0.12.16 修复真实 Chrome 页面身份被误拒绝及连接成功提示误导，见 [连接修复与交互验收记录](docs/windows-connection-acceptance.md)。安装与更新见 [Windows 开发版说明](docs/windows-development.md)，前一版本验证见 [Windows 验收记录](docs/windows-acceptance.md)。以下旧版本说明保留原功能背景，不能作为 Windows 已验收的证据。
 
 0.12.14：仅作用于 Overleaf 英文站 `https://www.overleaf.com/project/*` 和中文站 `https://cn.overleaf.com/project/*` 的个人 Chrome 扩展。根据项目宏包声明和自定义宏补充原生自动补全，在 Code 和 LaTeX Visual 模式中提供独立的 **MathJax / TeX** 公式预览。TeX 模式可再选择 **Overleaf 云端 / 本机** 编译。**Codex Assistant** 支持文稿选区提问、回答引用追问、项目对话历史、左右面板和 LaTeX 复制；默认使用本机 Codex，也可按项目选择自己的 DeepSeek 或其他兼容 API。
 

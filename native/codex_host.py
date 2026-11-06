@@ -34,7 +34,7 @@ from project_context import ProjectContextError, ProjectContextStore
 from cache_lifecycle import CacheLifecycle, CACHE_OPERATIONS, CACHE_FIELDS, validate_cache_request
 from context_transport import MAX_VALUE_BYTES, build_additional_context
 
-VERSION = "0.12.15"
+VERSION = "0.12.16"
 HOST_NAME = "com.overleaf.personal_tools.codex"
 # A 2,000-entry Unicode path manifest can exceed 2 MiB even with no content.
 # Individual operations retain their tighter validated limits.
@@ -1451,11 +1451,11 @@ class NativeHost:
         # complete, verified snapshot or multiply the model's context budget.
         request['files'] = []
 
-    def verify_project_reader(self, server, thread_id=None):
+    def verify_project_reader(self, server, thread_id=None, timeout=None):
         params = {'serverName': 'overleaf_project', 'detail': 'toolsAndAuthOnly'}
         if thread_id:
             params['threadId'] = thread_id
-        result = server.request('mcpServerStatus/list', params)
+        result = server.request('mcpServerStatus/list', params, **({'timeout': timeout} if timeout is not None else {}))
         required = {'list_project_files', 'search_project', 'read_project_file'}
         for item in result.get('data', []):
             if item.get('name') != 'overleaf_project' or item.get('toolsError'):
@@ -1665,15 +1665,39 @@ class NativeHost:
                     model = {'id': item.get('model') or item['id'], 'displayName': item.get('displayName') or item['id']}
                     model['efforts'] = [e['reasoningEffort'] for e in item.get('supportedReasoningEfforts', []) if isinstance(e, dict) and e.get('reasoningEffort') in EFFORTS]
                     models.append(model)
+                reader_ready, reader_error = False, None
+                if authenticated:
+                    try:
+                        # This discovers the isolated process's configured MCP
+                        # tools without opening a thread or asking a model. It
+                        # does not prove a page lease, snapshot, Desktop owner,
+                        # current conversation route, or inference availability.
+                        self.verify_project_reader(server, timeout=remaining_timeout(deadline, 10))
+                        reader_ready = True
+                    except Exception as error:
+                        # Keep successful runtime/auth/catalogue evidence even
+                        # when only the manuscript reader fails its own check.
+                        reader_error = safe_error(error)
+                if not authenticated:
+                    message = ('The local Codex backend is reachable. Sign in with Codex CLI or the Desktop app, '
+                               'then check again. No model request was run.')
+                elif reader_ready:
+                    message = ('The independent local Codex backend is connected and project reader tools were checked. '
+                               'The Desktop window is separate. No model request was run.')
+                else:
+                    message = ('The independent local Codex backend is connected, but the complete-project reader is not ready. '
+                               'The Desktop window is separate. No model request was run.')
                 self.emit(request['id'], 'status', available=True, authenticated=authenticated, models=models,
-                          message='Connected to local Codex.' if authenticated else 'Open Codex and sign in, then check the connection again.',
+                          connectionKind='standalone', projectReaderReady=reader_ready,
+                          **({'readerError': reader_error} if reader_error is not None else {}), message=message,
                           **({'errorCode': 'auth_required', 'retryable': False} if not authenticated else {}), version=VERSION)
                 return
             except Exception as error:
                 failure = connection_failure(error)
                 if attempt == 0 and failure['retryable'] and deadline - time.monotonic() > .25 and not self.closed.wait(.25):
                     continue
-                self.emit(request['id'], 'status', available=False, authenticated=False, models=[], **failure, version=VERSION)
+                self.emit(request['id'], 'status', available=False, authenticated=False, models=[],
+                          projectReaderReady=False, **failure, version=VERSION)
                 return
 
     def history(self, request):

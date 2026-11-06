@@ -89,6 +89,9 @@ class FakeServer:
             return {'account': {'type': 'chatgpt', 'email': 'not-exposed@example.com'}, 'requiresOpenaiAuth': True}
         if method == 'model/list':
             return {'data': [{'id': 'test', 'model': 'test-model', 'displayName': 'Test', 'supportedReasoningEfforts': [{'reasoningEffort': 'high'}]}]}
+        if method == 'mcpServerStatus/list':
+            return {'data': [{'name': 'overleaf_project', 'tools': {name: {'name': name} for name in
+                    ('list_project_files', 'search_project', 'read_project_file')}}]}
         if method == 'thread/read':
             return {'thread': {'id': params['threadId'], 'updatedAt': 100, 'historyMode': 'paginated', 'status': {'type': 'notLoaded'}}}
         if method == 'thread/turns/list':
@@ -311,6 +314,7 @@ class HostTests(unittest.TestCase):
         self.native.handle({'version':1,'id':'status','op':'status'})
         result=self.messages.wait('status','status')
         self.assertTrue(result['authenticated']);self.assertEqual(result['models'][0]['id'],'test-model')
+        self.assertEqual(result['connectionKind'], 'standalone');self.assertTrue(result['projectReaderReady'])
         self.assertNotIn('email',json.dumps(result))
         self.assertNotIn('not-exposed',json.dumps(result))
         self.assertFalse(any(call[0].startswith('thread/') for call in self.server.calls))

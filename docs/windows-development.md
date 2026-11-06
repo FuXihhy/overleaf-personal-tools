@@ -1,6 +1,6 @@
 # Windows 开发版：安装、更新与数据
 
-本分支基于私有仓库 v0.12.14、提交 `0803251324c32a2f213f39a4ece7ddac264ab126`。扩展显示 `0.12.15 Windows development`，固定 ID 为 `pffppbkokpnfafpechmlambifflkmbbn`，包含 LaTeX Preview 和 Codex Assistant。不要把本分支的 Windows 验证结论追溯到未修改的原始发布 ZIP；逐项证据见 [验收记录](windows-acceptance.md)。
+本分支基于私有仓库 v0.12.14、提交 `0803251324c32a2f213f39a4ece7ddac264ab126`。扩展显示 `0.12.16 Windows development`，固定 ID 为 `pffppbkokpnfafpechmlambifflkmbbn`，包含 LaTeX Preview 和 Codex Assistant。不要把本分支的 Windows 验证结论追溯到未修改的原始发布 ZIP；前次证据见 [验收记录](windows-acceptance.md)，当前修复及真实页面进展见 [连接修复记录](windows-connection-acceptance.md)。
 
 ## 安装与更新
 
@@ -20,7 +20,7 @@ python -X utf8 native/install.py --install
 
 程序位于 `%USERPROFILE%\.overleaf-personal-tools\codex-native-host` 与 `native-host`；manifest 位于同一产品目录下的 `NativeMessagingHosts`。使用用户目录可避免打包版 Codex 将 LocalAppData 重定向到 MSIX 缓存，导致 Chrome 看不到同名文件。注册表使用 `HKCU\Software\Google\Chrome\NativeMessagingHosts`，只允许固定扩展 ID。遇到不属于本安装器的目录或注册项会报错，不覆盖。
 
-Chrome 打开 `chrome://extensions`，开启开发者模式，加载 checkout 的 `dist`，然后刷新 Overleaf。实际 ID 必须与固定 ID 和两个 manifest 的 `allowed_origins` 一致。入口为 Settings → Extension → LaTeX Preview / Codex Assistant。Check connection 仅读取登录状态、模型及推理强度，不发送问题。`python -X utf8 scripts/windows-native-smoke.py` 检查已安装的同一启动器和帧协议，不能替代真实页面验收。
+Chrome 打开 `chrome://extensions`，开启开发者模式，加载 checkout 的 `dist`，然后刷新 Overleaf。实际 ID 必须与固定 ID 和两个 manifest 的 `allowed_origins` 一致。入口为 Settings → Extension → LaTeX Preview / Codex Assistant。Check connection 读取登录状态、模型及推理强度，并检查完整项目读取工具目录，不发送问题。成功显示“本机后台已检查”：这是扩展启动的独立 CLI 后台，与桌面窗口是否打开无关，也不证明实际推理、当前项目同步或桌面聊天写入权已经通过验收。项目同步失败时另显示受阻状态，关闭提示或重新检查后台不能清除该错误。`python -X utf8 scripts/windows-native-smoke.py` 检查已安装的同一启动器和帧协议，不能替代真实页面验收。
 
 更新时先保留未发送草稿，等生成结束，更新源码后重新运行构建与两个安装器。在 Chrome 点击“重新加载”再刷新项目页。**不要卸载扩展来更新**，避免丢失浏览器设置。
 
