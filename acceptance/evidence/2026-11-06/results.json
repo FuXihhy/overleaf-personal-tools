@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "recordType": "historical-maintainer-acceptance",
+  "date": "2026-11-06",
+  "timezone": "Asia/Shanghai",
+  "platform": "Windows",
+  "extensionVersion": "0.12.17",
+  "sourceCommit": "ccde0be",
+  "testData": "synthetic project only",
+  "automated": {
+    "frontend": {"suites": 56, "passed": 971, "failed": 0, "typecheck": "passed", "build": "passed"},
+    "native": {"total": 421, "passed": 406, "skipped": 15, "failed": 0, "skipReasons": ["macOS-only sandbox-exec cases", "Windows symlink privileges unavailable"]},
+    "installedPythonCopies": {"checked": 14, "matched": 14},
+    "localMockProviderRequests": 0
+  },
+  "realUiPassed": [
+    "complete project synchronization and cross-file tool reading",
+    "history after refresh",
+    "streaming, queue pause/resume and steering",
+    "interrupted partial answer survives refresh and later synchronization",
+    "Desktop-origin completed question and answer return to same web conversation",
+    "real DeepSeek answer, formula rendering, cancellation and history restoration",
+    "MathJax, local TeX, cloud TeX and Code/Visual preview",
+    "project macro completion and exact undo",
+    "source selection, answer quote, navigation and removal",
+    "panel position, theme and text-size changes followed by restoration",
+    "temporary cache retained with one page, collected after last page leaves",
+    "persistent cache and shared blobs survive automatic collection",
+    "user-confirmed cache cleanup preserves conversations",
+    "current two-file cache restored after cleanup"
+  ],
+  "userConfirmed": ["Open in Codex displays first answer", "Desktop displays web-origin next question", "formula click and Ctrl+V copy LaTeX", "old conversation moved to Desktop Overleaf project", "explicit synthetic cache cleanup authorized"],
+  "partialAnswer": {"characters": 2113, "sha256": "58b39e7f792cf1aad1d8642e3e9a13d688faa67fd5119493d5cff794d7b9fce3", "preservedAfterRefreshAndDesktopReply": true},
+  "cacheAfterCleanupAndResync": {"sourceFiles": 2, "bytes": 487, "temporaryVersions": 1, "retainedVersions": 0, "protectedOperations": 0},
+  "notVerified": ["macOS runtime", "full Chrome restart", "BFCache restoration", "all Desktop writer handoff branches"],
+  "knownLimitations": ["backend project assignment does not guarantee Desktop sidebar grouping", "partial text already deleted before the fix was not recovered"],
+  "newInstallationAccepted": false
+}

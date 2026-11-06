@@ -1,5 +1,7 @@
 # Windows 开发版：安装、更新与数据
 
+首次安装优先使用[安装与验收快速指南](../acceptance/README.md)的一条命令流程；本文保留逐步安装、权限和数据边界，便于诊断与维护。Windows 发现的共享问题及 macOS 回归建议见[跨平台同步说明](cross-platform-fixes-0.12.17.md)。
+
 本分支基于私有仓库 v0.12.14、提交 `0803251324c32a2f213f39a4ece7ddac264ab126`。扩展显示 `0.12.17 Windows development`，固定 ID 为 `pffppbkokpnfafpechmlambifflkmbbn`，包含 LaTeX Preview 和 Codex Assistant。不要把本分支的 Windows 验证结论追溯到未修改的原始发布 ZIP；前次证据见 [验收记录](windows-acceptance.md)，当前修复及真实页面进展见 [连接修复记录](windows-connection-acceptance.md)。
 
 ## 安装与更新

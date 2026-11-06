@@ -1,5 +1,7 @@
 # 0.12.16–0.12.17 连接修复与真实交互验收
 
+可在 GitHub 直接查看的合成项目截图与结构化摘要已整理到[本轮验收证据](../acceptance/evidence/2026-11-06/README.md)。其他用户重新安装时应使用[安装与验收指南](../acceptance/README.md)，不要把下面的维护者实测结果当作自己机器已通过。
+
 日期：2026-11-06；设备与安装目录延续 [Windows 安装说明](windows-development.md)。用户报告关闭本地 Codex 后仍显示 Connected，发送时却出现 `A verified Chrome project document is required for project caching`。本次先修复这两个问题，再继续真实页面验收；不把自动化测试等同于实际页面完成。
 
 ## 根因与修复

@@ -1,10 +1,10 @@
 # Windows 安装与适配说明
 
-本开发分支已加入 Windows 本机连接和隔离执行实现。**当前安装/更新步骤、数据位置及平台边界见 [Windows 开发版安装说明](windows-development.md)**，逐项验证见 [Windows 验收记录](windows-acceptance.md)。下文保留 v0.12.14 原始发布包的下载说明与适配起点，不代表本开发分支的最终验证状态。
+本开发分支已加入 Windows 本机连接和隔离执行实现。**新用户请从[安装与验收快速指南](../acceptance/README.md)开始**；它提供统一脚本、合成测试项目和必须手动完成的操作。底层步骤、数据位置及平台边界见 [Windows 开发版安装说明](windows-development.md)，最新实测见 [0.12.17 验收证据](../acceptance/evidence/2026-11-06/README.md)。下文保留 v0.12.14 原始发布包的下载说明与适配起点，不代表本开发分支的最终验证状态。
 
-当前浏览器扩展版本：**0.12.14**。本机 Codex/API 连接版本：**0.12.12**。
+以下历史说明对应浏览器扩展 **0.12.14**、本机 Codex/API 连接 **0.12.12**，不是本分支的当前版本。
 
-这个仓库同时包含 LaTeX Preview 和 Codex Assistant 的完整实现。当前 macOS 本机连接不能直接在 Windows 上运行；Windows 浏览器部分尚未完成实机验收。
+该原始发布包同时包含 LaTeX Preview 和 Codex Assistant 的完整实现，但当时的 macOS 本机连接不能直接在 Windows 上运行，Windows 浏览器部分也尚未完成实机验收。后续 Windows 实现与验证以本页开头的链接为准。
 
 ## 下载后加载扩展
 

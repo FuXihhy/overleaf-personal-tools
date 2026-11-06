@@ -8,7 +8,9 @@
 
 完整源码包含 **LaTeX Preview 和 Codex Assistant 两部分**、本机连接程序、测试与构建配置。预构建扩展和源码 ZIP 在本仓库的 [Releases](https://github.com/FuXihhy/overleaf-personal-tools/releases) 下载；私有仓库需要先登录有访问权限的 GitHub 账号。
 
-**Windows 用户先看 [Windows 开发版说明](docs/windows-development.md)。** 本开发分支提供 Windows 本机连接；原始 v0.12.14 发布包仅提供 macOS 本机连接，两者不能混用验收结论。浏览器内补全、MathJax、Overleaf 云端预览和完整交互仍需按 [Windows 验收记录](docs/windows-acceptance.md) 在真实页面检查。加载扩展后还需分别安装 Codex 和本机 TeX 连接程序。
+**Windows 新用户先看 [一条命令安装与验收指南](acceptance/README.md)。** 它提供安装/检查脚本、可一次上传的合成项目、必要的用户操作和通过标准；本机 TeX、自己的 API、桌面续聊等按需选择。实现细节见 [Windows 开发版说明](docs/windows-development.md)。本开发分支提供 Windows 本机连接；原始 v0.12.14 发布包仅提供 macOS 本机连接，两者不能混用验收结论。脚本不会把后台检查冒充真实问答或浏览器验收。
+
+**macOS 维护者参考[共享修复与回归清单](docs/cross-platform-fixes-0.12.17.md)。** Windows 验收发现的页面身份、连接状态、停止后文本保留和预览状态问题涉及共享代码；文档逐项标注实现、测试、迁移依赖和 Windows 专用部分。可分享的历史实测截图与摘要见[验收证据](acceptance/evidence/2026-11-06/README.md)，它不代表已在 macOS 或新用户机器通过。
 
 发布文件不包含用户的 API 密钥、Codex 登录状态、聊天数据库、Overleaf 项目缓存或真实文稿截图。切换电脑后需要使用该电脑自己的登录和配置。
 
