@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   panelOptions: undefined as CodexPanelOptions | undefined,
   discover: vi.fn(), readFile: vi.fn(), captureFull: vi.fn(), sourceRequest: vi.fn(), buildIndex: vi.fn(), request: vi.fn(), close: vi.fn(),
   loadMessages: vi.fn(), saveMessages: vi.fn(), saveDefaults: vi.fn(), saveCodexSettings: vi.fn(),
-  revealSource: vi.fn(), sourceCheck: vi.fn(),
+  revealSource: vi.fn(), sourceCheck: vi.fn(), acquireCachePage: vi.fn(),
   renderedMacros: [] as string[][],
   panel: { setCacheNotice:vi.fn(), setConnection:vi.fn(), appendMessage: vi.fn(), setMessages: vi.fn(), syncMessages:vi.fn(), isOpen:vi.fn(), setRemoteState:vi.fn(), setAssistantText: vi.fn(), setSelection: vi.fn(), clearSelection: vi.fn(), clearAnswerQuote: vi.fn(), setStatus: vi.fn(), setBusy: vi.fn(), update: vi.fn(), destroy: vi.fn(), setHistoryPaging:vi.fn(), prependMessages:vi.fn(),setPosition:vi.fn(),setQueue:vi.fn(),setSteering:vi.fn(),insertSteeringMessage:vi.fn() },
   ui: { update: vi.fn(), refreshForm: vi.fn(), destroy: vi.fn() },
@@ -28,6 +28,9 @@ vi.mock('../src/settings/storage', () => ({ loadSettings: async () => ({ ...DEFA
 vi.mock('../src/settings/native-panel', () => ({ mountNativeSettings: (model: () => PanelModel, actions: PanelActions) => { mocks.model = model; mocks.actions = actions; return mocks.ui; } }));
 vi.mock('../src/codex/panel', () => ({ mountCodexAssistant: (options: CodexPanelOptions) => { mocks.panelOptions = options; return mocks.panel; } }));
 vi.mock('../src/codex/client', () => ({ CodexClient: class { request = (op: string, ...args: unknown[]) => op==='source-check' ? mocks.sourceCheck(...args) : op.startsWith('source-') ? mocks.sourceRequest(op, ...args) : mocks.request(op, ...args); close = mocks.close; } }));
+// Chrome document identity/lease behavior is exercised with the real module in
+// codex-cache-lifecycle.test.ts. Content tests isolate orchestration from Chrome.
+vi.mock('../src/codex/cache-lifecycle', () => ({ createProjectCachePage: () => ({ acquire: mocks.acquireCachePage }) }));
 vi.mock('../src/codex/storage', () => ({
   codexStorageKey: (project: string, account?: string) => `codex:${account}:${project}`,
   loadCodexSettings: async () => ({ ...DEFAULT_CODEX_SETTINGS }), saveCodexSettings: mocks.saveCodexSettings, saveCodexDefaults: mocks.saveDefaults,
@@ -66,6 +69,7 @@ beforeEach(() => {
   mocks.captureFull.mockReset().mockImplementation(async (options: { liveDocuments: Map<string, string> }) => { const current = await mocks.discover(); return { rootPath: current.rootPath, files: await Promise.all(current.files.map(async (file: { path: string }) => ({ path: file.path, content: options.liveDocuments.get(file.path) ?? await mocks.readFile(file) }))) }; });
   mocks.sourceRequest.mockReset().mockImplementation(async (op: string) => ({ id: 'source', type: 'source', ...(op === 'source-commit' ? { snapshotId: 'ab'.repeat(32) } : { uploadId: '12345678-1234-4234-8234-123456789abc' }) }));
   mocks.sourceCheck.mockReset().mockImplementation(async(data:{snapshotId:string})=>({id:'check',type:'source',snapshotId:data.snapshotId}));
+  mocks.acquireCachePage.mockReset().mockResolvedValue({documentId:'1:12345678-1234-4234-8234-123456789abc',leaseToken:'12345678-1234-4234-8234-123456789abc'});
   mocks.buildIndex.mockReset().mockResolvedValue(emptyIndex()); mocks.request.mockReset().mockResolvedValue({ id: 'test', type: 'done', text: '' });
   mocks.loadMessages.mockReset().mockResolvedValue([]); mocks.saveMessages.mockReset().mockResolvedValue(undefined);
   mocks.saveCodexSettings.mockReset().mockResolvedValue(undefined);
@@ -85,6 +89,29 @@ afterEach(() => {
 });
 
 describe('Codex content integration', () => {
+  it('sends normal context without downloading or leasing complete project source',async()=>{
+    await boot();await mocks.actions!.saveCodex!({...DEFAULT_CODEX_SETTINGS,contextMode:'selection',cacheMode:'normal'});
+    await mocks.panelOptions!.onSend('Explain this selection',selection);
+    expect(mocks.captureFull).not.toHaveBeenCalled();expect(mocks.acquireCachePage).not.toHaveBeenCalled();expect(mocks.sourceRequest).not.toHaveBeenCalled();
+    expect(mocks.request).toHaveBeenLastCalledWith('ask',expect.objectContaining({selection,settings:expect.objectContaining({cacheMode:'normal',contextMode:'selection'})}),expect.any(Function));
+    await expect(mocks.actions!.onSyncProjectCache!()).rejects.toThrow('Enable complete project context');
+  });
+  it.each(['on-demand','persistent'] as const)('registers a verified page before capture and passes %s only on source-begin',async cacheMode=>{
+    await boot();await mocks.actions!.saveCodex!({...DEFAULT_CODEX_SETTINGS,cacheMode});
+    await mocks.actions!.onSyncProjectCache!();
+    expect(mocks.acquireCachePage.mock.invocationCallOrder[0]).toBeLessThan(mocks.captureFull.mock.invocationCallOrder[0]);
+    expect(mocks.sourceRequest).toHaveBeenCalledWith('source-begin',expect.objectContaining({cacheMode,leaseToken:'12345678-1234-4234-8234-123456789abc'}));
+    expect(mocks.sourceRequest.mock.calls.filter(([op])=>op!=='source-begin').every(([,data])=>!('cacheMode' in data)&&!('leaseToken' in data))).toBe(true);
+  });
+  it('requires a reviewed exact cache revision before explicit cleanup and leaves chat history independent',async()=>{
+    await boot();const cacheInfo={folder:'C:\\Synthetic\\managed-source',snapshotCount:2,totalBytes:400,lastSyncedAt:1800000000,temporaryCount:0,persistentCount:2,legacyCount:0,pageCount:1,pinCount:0,cleanupPending:false,cacheRevision:'ab'.repeat(32)};
+    mocks.sourceRequest.mockResolvedValue({id:'source',type:'source',cacheInfo});
+    await expect(mocks.actions!.clearProjectCache!()).rejects.toThrow('Inspect local versions');
+    const description=await mocks.actions!.inspectProjectCache!();expect(description).toContain('2 versions');expect(description).toContain(cacheInfo.folder);
+    await mocks.actions!.clearProjectCache!();expect(mocks.sourceRequest).toHaveBeenLastCalledWith('source-cache-clear',{cacheRevision:cacheInfo.cacheRevision});
+    await expect(mocks.actions!.clearProjectCache!()).rejects.toThrow('Inspect local versions');
+    expect(mocks.saveMessages).not.toHaveBeenCalled();expect(mocks.captureFull).not.toHaveBeenCalled();
+  });
   it('keeps a cache failure reminder through connection status updates and clears it only after a successful sync',async()=>{
     await boot();
     mocks.captureFull.mockRejectedValueOnce(new Error('Project export unavailable'));

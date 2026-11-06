@@ -113,6 +113,25 @@ class ManuscriptMCPTests(unittest.TestCase):
         result = handle_request(self.store, {'jsonrpc': '2.0', 'id': 1, 'method': 'filesystem/write'})
         self.assertEqual(result['error']['code'], -32601)
 
+    def test_real_stdio_unicode_is_utf8_even_with_non_utf8_text_wrapper(self):
+        import os
+        text = '中文😀\\cN\n尾部'
+        path = '章节/定义😀.tex'
+        snapshot = upload(self.store, {'main.tex': 'synthetic', path: text})
+        request = {'jsonrpc': '2.0', 'id': '中文😀', 'method': 'tools/call',
+                   'params': {'name': 'read_project_file', 'arguments': {'snapshot_id': snapshot, 'path': path}}}
+        script = Path(__file__).resolve().parents[1] / 'manuscript_mcp.py'
+        environment = dict(os.environ, PYTHONIOENCODING='gbk', PYTHONUTF8='0')
+        result = subprocess.run([sys.executable, str(script), '--root', str(self.root)],
+                                input=(json.dumps(request, ensure_ascii=False) + '\n').encode('utf-8'),
+                                capture_output=True, env=environment, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        response = json.loads(result.stdout.decode('utf-8'))
+        self.assertEqual(response['id'], '中文😀')
+        self.assertFalse(response['result'].get('isError', False))
+        self.assertIn('中文😀', response['result']['content'][0]['text'])
+        self.assertIn('尾部', response['result']['content'][0]['text'])
+
 
 if __name__ == '__main__':
     unittest.main()

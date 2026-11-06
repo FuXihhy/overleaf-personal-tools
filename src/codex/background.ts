@@ -1,6 +1,7 @@
 import { CODEX_NATIVE_HOST, CODEX_PORT, parseCodexEvent, validCodexRequest, isCodexSelection, isCodexAnswerQuote, record, type CodexMessage } from './types';
 import { PromptQueue } from './prompt-queue';
 import { codexStorageKey } from './storage';
+import type { ProjectCacheCoordinator } from './cache-lifecycle';
 
 export function registerCodexTransport(runtime: typeof chrome.runtime, allowed: (sender: chrome.runtime.MessageSender, extensionId: string) => boolean): () => void {
   const connections = new Set<() => void>();
@@ -86,7 +87,7 @@ function validMessages(value: unknown): value is CodexMessage[] {
     length += m.text.length + (m.selection ? JSON.stringify(m.selection).length : 0) + (m.answerQuote ? JSON.stringify(m.answerQuote).length : 0); return length <= 400_000;
   });
 }
-export function registerCodexHistory(runtime: typeof chrome.runtime, session: chrome.storage.StorageArea, allowed: (sender: chrome.runtime.MessageSender, extensionId: string) => boolean): void {
+export function registerCodexHistory(runtime: typeof chrome.runtime, session: chrome.storage.StorageArea, allowed: (sender: chrome.runtime.MessageSender, extensionId: string) => boolean, cache?: ProjectCacheCoordinator): void {
   const queueOperations=new Map<string,Promise<void>>();
   runtime.onMessage.addListener((raw, sender, respond) => {
     const data = record(raw);
@@ -104,9 +105,18 @@ export function registerCodexHistory(runtime: typeof chrome.runtime, session: ch
         try{
           const saved=record((await session.get(key))[key]);
           const revision=typeof saved?.revision==='string'?saved.revision:'';
-          if(data.action==='read'){respond({ok:true,revision,items:Array.isArray(saved?.items)?saved.items:[]});return;}
+          if(data.action==='read'){
+            const items=Array.isArray(saved?.items)?saved.items:[];
+            if(cache)try{await cache.queueWrite({projectId:String(data.projectId),accountId:String(data.accountId)},items,items,async()=>{});}
+            catch(error){respond({ok:true,revision,items,cacheError:error instanceof Error?error.message.slice(0,1000):'Source protection is unavailable.'});return;}
+            respond({ok:true,revision,items});return;
+          }
           if(data.expectedRevision!==revision){respond({ok:false,message:'Queued messages changed in another window. Reload to review the latest queue; nothing was sent.'});return;}
-          const nextRevision=crypto.randomUUID();await session.set({[key]:{revision:nextRevision,items:data.items}});respond({ok:true,revision:nextRevision});
+          const nextRevision=crypto.randomUUID();
+          const persist=()=>session.set({[key]:{revision:nextRevision,items:data.items}});
+          if(cache)await cache.queueWrite({projectId:String(data.projectId),accountId:String(data.accountId)},Array.isArray(saved?.items)?saved.items:[],data.items as unknown[],persist);
+          else await persist();
+          respond({ok:true,revision:nextRevision});
         }catch{respond({ok:false,message:'Queued messages could not be saved in browser storage.'});}
       })();
       queueOperations.set(key,operation);void operation.finally(()=>{if(queueOperations.get(key)===operation)queueOperations.delete(key);});return true;

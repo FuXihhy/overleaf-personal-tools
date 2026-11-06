@@ -17,6 +17,9 @@ import sys
 import threading
 import uuid
 
+if os.name == 'nt':
+    from windows_desktop import NamedPipeSocket, PIPE_PATH
+
 
 UUID_RE = re.compile(r'^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$')
 MAX_FRAME = 16 * 1024 * 1024
@@ -80,7 +83,8 @@ def _check_peer(sock):
 class DesktopIPC:
     def __init__(self, socket_path=None, timeout=5):
         home = Path(os.environ.get('CODEX_HOME', str(Path.home() / '.codex')))
-        self.path = Path(socket_path) if socket_path else home / 'ipc' / 'ipc.sock'
+        self.path = (str(socket_path) if socket_path else PIPE_PATH) if os.name == 'nt' else (Path(socket_path) if socket_path else home / 'ipc' / 'ipc.sock')
+        self.peer_started_at = None
         self.timeout = timeout
         self.events = queue.Queue(maxsize=256)
         self.client_id = None
@@ -93,13 +97,17 @@ class DesktopIPC:
         self._pending_lock = threading.Lock()
         self._pending = {}
         self._socket = None
-        _check_socket(self.path)
         try:
-            self._socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            self._socket.settimeout(timeout)
-            self._socket.connect(str(self.path))
-            _check_peer(self._socket)
-            self._socket.settimeout(None)
+            if os.name == 'nt':
+                self._socket = NamedPipeSocket(self.path, timeout)
+                self.peer_started_at = self._socket.peer['created_at']
+            else:
+                _check_socket(self.path)
+                self._socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                self._socket.settimeout(timeout)
+                self._socket.connect(str(self.path))
+                _check_peer(self._socket)
+                self._socket.settimeout(None)
             self._reader = threading.Thread(target=self._read_loop, name='overleaf-desktop-ipc', daemon=True)
             self._reader.start()
             result = self._request('initialize', {'clientType': 'overleaf-personal-tools'})

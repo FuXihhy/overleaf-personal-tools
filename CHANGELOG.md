@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.12.15 Windows development — 2026-11-06（独立开发分支，未发布）
+
+- 新增当前用户 Native Messaging 注册和可重复安装；固定扩展身份保留。Windows 数据放在用户目录 `.overleaf-personal-tools`，避免 MSIX LocalAppData 重定向。启动器处理 UTF-8 路径；缺失 manifest 的卸载仍清理仅属于本安装的注册值。
+- Windows 私有存储使用受保护 ACL、reparse/junction 拒绝、真实跨进程锁和不可覆盖原子发布；底层文件描述符启用 O_BINARY，修复 SQLite 和原始字节在文本模式下损坏。MCP stdio 明确输出 UTF-8；reader 更新摘要包含权限/锁依赖。
+- Codex Desktop named pipe 使用真实协议并验证服务端用户、session、package、可执行路径。独立 app-server 隐藏且挂起启动，先进入 Job Object 再恢复，退出清理后代。保留 macOS 分支。
+- Windows TeX 使用无网络 capability 的 AppContainer 和 Job Object，提供三个编译器、取消/超时/断开清理与越界文件/网络验证；缺少必要权限或依赖时明确失败，不回退无沙盒。API 模式在 Windows 通过可检查取消状态的分段 socket 读取中止阻塞响应；保留空闲超时和 UTF-8 跨片段完整性，不重试网络请求。
+- 项目缓存增加普通、按需和本地保留模式、原路径只读版本镜像、缓存信息与显式清理。持久页面租约、排队和活动请求保护记录与同锁回收，避免刷新、后台休眠或结果不明时误删；旧缓存和本地保留版本不自动删除。
+- 修复 Windows CRLF hashbang、文件 URL 和过量测试并发。完整测试结果、真实页面用户确认与未验收边界记录在 docs/windows-acceptance.md。
+
 ## 0.12.14 — 2026-11-02
 
 - LaTeX Preview 的项目支持区域新增绿色 Reconnect editor／重新连接编辑器按钮，折叠详情时也可使用。沿用原生按钮样式；连接中与确认结果在预留的灰色状态行显示，不再产生布局跳动。无需二次确认，不受项目索引忙碌影响。

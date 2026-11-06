@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from platform_test_support import assert_private, make_symlink, private_permissions
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from project_context import ProjectContextError, ProjectContextStore
@@ -77,7 +78,7 @@ class IncrementalContextTests(unittest.TestCase):
         blob = self.store._content_blob(SCOPE, entry['sha256'])
         for corrupt in (True, False):
             if corrupt:
-                blob.chmod(0o600); blob.write_bytes(b'incorrect')
+                private_permissions(blob, 0o600); blob.write_bytes(b'incorrect')
             else:
                 blob.unlink()
             with self.assertRaises(ProjectContextError):
@@ -86,7 +87,7 @@ class IncrementalContextTests(unittest.TestCase):
             self.assertEqual(missing, ['main.tex'])
             self.assertEqual(recovered, original)
             self.assertEqual(self.store.get(SCOPE, original)['files'][0]['content'], files['main.tex'])
-            self.assertEqual(blob.stat().st_mode & 0o777, 0o400)
+            assert_private(self, blob, 0o400)
 
     def test_corruption_after_missing_list_never_publishes_partial_snapshot(self):
         files = {'main.tex': 'exact bytes'}
@@ -115,7 +116,7 @@ class IncrementalContextTests(unittest.TestCase):
         path = self.store.snapshots / (snapshot_id + '.json')
         value = {'version': 1, 'snapshot_id': snapshot_id, 'scope': SCOPE, 'root_path': 'main.tex',
                  'manifest': manifest(files), 'files': [{'path': p, 'content': text} for p, text in files.items()], 'created_at': 1}
-        path.write_text(json.dumps(value)); path.chmod(0o400)
+        path.write_text(json.dumps(value)); private_permissions(path, 0o400)
         reader = ProjectContextStore(self.store.root, read_only=True)
         self.assertEqual(reader.get(SCOPE, snapshot_id)['files'], value['files'])
         self.assertEqual(list(self.store.blobs.iterdir()), [])
@@ -130,8 +131,8 @@ class IncrementalContextTests(unittest.TestCase):
         self.delta(files)
         blob = self.store._content_blob(SCOPE, manifest(files)[0]['sha256'])
         blob.unlink()
-        outside = self.base / 'outside'; outside.write_text('never modify'); outside.chmod(0o600)
-        blob.symlink_to(outside)
+        outside = self.base / 'outside'; outside.write_text('never modify'); private_permissions(outside, 0o600)
+        make_symlink(blob, outside)
         identifier = self.store.begin(SCOPE, 'main.tex', manifest(files))
         self.assertEqual(self.store.missing_paths(SCOPE, identifier), ['main.tex'])
         self.store.chunk(SCOPE, identifier, 'main.tex', 0, 'safe')

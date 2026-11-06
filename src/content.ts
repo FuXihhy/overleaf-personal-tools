@@ -23,7 +23,8 @@ import { readOverleafAccount } from './overleaf/account';
 import { mountCodexAssistant } from './codex/panel';
 import { CodexClient } from './codex/client';
 import { CodexCatalogue } from './codex/catalogue';
-import { DEFAULT_CODEX_SETTINGS, isCodexSelection, sourcePath, validateCodexSettings, type CodexAnswerQuote, type CodexMessage, type CodexSelection } from './codex/types';
+import { DEFAULT_CODEX_SETTINGS, codexCacheMode, isCodexSelection, sourcePath, validateCodexSettings, type CodexAnswerQuote, type CodexMessage, type CodexSelection, type CodexCacheInfo } from './codex/types';
+import { createProjectCachePage } from './codex/cache-lifecycle';
 import { codexStorageKey, loadCodexSettings, saveCodexSettings, saveCodexDefaults, loadCodexMessages, saveCodexMessages, loadCodexPanelPosition, saveCodexPanelPosition, loadCodexClickToCopy, saveCodexClickToCopy, loadCodexCopyToast, saveCodexCopyToast, loadCodexBusyMessageBehavior, saveCodexBusyMessageBehavior } from './codex/storage';
 import type { CodexEvent } from './codex/types';
 import { syncCodexProjectSource, type CodexProjectSnapshot } from './codex/context';
@@ -43,11 +44,14 @@ async function start() {
   if (!context.alive()) return;
   const model: PanelModel = { settings: DEFAULT_SETTINGS, files: [], index: emptyIndex(), status: '正在读取项目文件…', busy: true, editorReady: false, codex: { ...DEFAULT_CODEX_SETTINGS } };
   const accountId = readOverleafAccount();
+  const cachePage=createProjectCachePage(projectId,()=>readOverleafAccount(),context.signal);
+  let cacheRevision:string|undefined;
   const codexClient = new CodexClient(projectId, accountId, () => context.invalidate('extension-updated'));
   const provider = () => model.codex?.providerId;
   const requestCodex: CodexClient['request'] = async (...args) => {
     const [op,data,onEvent]=args;
     try {
+      if(readOverleafAccount()!==accountId)throw new Error('The Overleaf account changed. Refresh this project page before continuing.');
       if (op === 'provider-list' || op.startsWith('source-') || !provider()) return await codexClient.request(...args);
       const scoped={...data,providerId:provider()};
       return await (onEvent ? codexClient.request(op,scoped,onEvent) : codexClient.request(op,scoped));
@@ -95,6 +99,11 @@ async function start() {
       ? cacheReadError?'error':cacheSavedOnly?'saved':cachePossiblyStale?'stale':null : null);
   }
   function cacheFailure(){cacheReadError=true;refreshCacheNotice();}
+  function describeCache(info:CodexCacheInfo){
+    const when=info.lastSyncedAt?new Date(info.lastSyncedAt*1000).toLocaleString():'—';
+    return codexText(`本机源码：${info.snapshotCount} 个版本，${info.totalBytes} 字节。临时 ${info.temporaryCount}，保留 ${info.persistentCount}，旧版保留 ${info.legacyCount}。页面 ${info.pageCount}，受保护任务 ${info.pinCount}。\n最近同步：${when}\n只读镜像：${info.folder||'无'}${info.cleanupPending?'\n清理将在保护条件解除后进行。':''}`,
+      `Local source: ${info.snapshotCount} versions, ${info.totalBytes} bytes. Temporary ${info.temporaryCount}; retained ${info.persistentCount}; legacy ${info.legacyCount}. Pages ${info.pageCount}; protected operations ${info.pinCount}.\nLast sync: ${when}\nRead-only mirror: ${info.folder||'none'}${info.cleanupPending?'\nCleanup is pending protected work.':''}`);
+  }
   const cacheFreshness=new CodexCacheFreshness({changed:stale=>{cachePossiblyStale=stale;refreshCacheNotice();}});
   function snapshotNote(snapshot: { fileCount?: number; sourceFileCount?: number }) {
     const count = snapshot.fileCount ?? snapshot.sourceFileCount;
@@ -118,8 +127,11 @@ async function start() {
     const operation = projectSourceSync.then(async () => {
       if (!current()) throw new Error(codexText('对话已改变，项目同步已取消。', 'The conversation changed; project synchronization was cancelled.'));
       if(!background)codexPanel.setStatus(codexText('正在同步完整项目…', 'Syncing the complete project…'));
+      const lease=await cachePage.acquire();
+      const cacheMode=codexCacheMode(model.codex);
+      if(cacheMode==='normal')throw new Error(codexText('普通上下文不下载完整项目。','Normal context does not download the complete project.'));
       const full = await source.captureFull({ liveDocuments: documents, signal: context.signal });
-      const result=await syncCodexProjectSource(full, (op, data) => requestCodex(op, data), current);
+      const result=await syncCodexProjectSource(full, (op, data) => requestCodex(op, op==='source-begin'?{...data,cacheMode,leaseToken:lease.leaseToken}:data), current);
       cacheReadError=false;cacheSavedOnly=!!(activePath || document.querySelector('.cm-editor')) && !documents.size;cacheFreshness.synced(full.files,captureRevision);refreshCacheNotice();
       return result;
     });
@@ -163,6 +175,22 @@ async function start() {
   let lastPreviewError: {key:string;result:PreviewResult} | undefined;
 
   const ui = mountNativeSettings(() => model, {
+    async openProjectCache(){
+      const result=await requestCodex('source-cache-open');
+      if(!result.cacheInfo)throw new Error('The local helper did not report a source folder.');
+      return describeCache(result.cacheInfo);
+    },
+    async inspectProjectCache(){
+      const result=await requestCodex('source-cache-info');
+      if(!result.cacheInfo)throw new Error('Update the local helper to inspect retained source.');
+      cacheRevision=result.cacheInfo.cacheRevision;return describeCache(result.cacheInfo);
+    },
+    async clearProjectCache(){
+      if(!cacheRevision)throw new Error('Inspect local versions before clearing retained source.');
+      const result=await requestCodex('source-cache-clear',{cacheRevision});cacheRevision=undefined;
+      if(!result.cacheInfo)throw new Error('The local helper did not confirm source cleanup.');
+      return describeCache(result.cacheInfo);
+    },
     async onSyncProjectCache() {
       if(!context.alive() || !codexReady || !model.codex?.enabled || model.codex.contextMode!=='project')throw new Error(codexText('请先启用完整项目上下文。','Enable complete project context first.'));
       const generation=codexGeneration;
@@ -1100,6 +1128,7 @@ async function start() {
         const result=await chrome.runtime.sendMessage({type:'opt:codex-queue',projectId,accountId,action:'read'});
         if(!result?.ok || typeof result.revision!=='string')throw new Error('Queue unavailable');
         queueRevision=result.revision;promptQueue.restore(result.items);publishQueue(false);
+        if(typeof result.cacheError==='string')codexPanel.setStatus(codexText('已恢复排队消息并暂停发送，但源码保护暂不可用。请先检查本机连接；缺失的旧版本须重新捕获，原消息未删除。','Saved queued messages were restored and paused, but source protection is unavailable. Check the local connection; missing historical versions must be recaptured. The original queue remains saved.')+' '+result.cacheError);
       }catch{codexPanel.setStatus(codexText('暂时无法读取排队消息，刷新前请保留草稿。','Queued messages could not be read. Keep your draft before refreshing.'));}
     }
     codexReady = true;

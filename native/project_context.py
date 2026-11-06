@@ -5,7 +5,8 @@ visible to readers; scoped callers and capability-based MCP readers share the
 same immutable snapshot format. No project or workspace file is modified.
 """
 import contextlib
-import fcntl
+from platform_utils import (IS_WINDOWS, fcntl, support_directory, is_link, owned_by_user,
+                            is_private, private_permissions, touch_private_directory)
 import hashlib
 import json
 import os
@@ -27,7 +28,7 @@ MAX_JSON_BYTES = MAX_TOTAL_BYTES * 6 + 4 * 1024 * 1024
 UPLOAD_IDLE_TTL = 24 * 60 * 60
 HEX = re.compile(r'^[a-f0-9]{64}$')
 UPLOAD = re.compile(r'^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$')
-DEFAULT_ROOT = Path.home() / 'Library/Application Support/OverleafPersonalTools/codex-assistant/project-context'
+DEFAULT_ROOT = support_directory() / 'codex-assistant/project-context'
 
 
 class ProjectContextError(ValueError):
@@ -77,7 +78,7 @@ def _manifest(root_path, entries):
 def _check_components(path):
     # Do not resolve() first: that would conceal a supplied symlink.
     for component in [path] + list(path.parents):
-        if component.is_symlink():
+        if is_link(component):
             raise ProjectContextError('Snapshot storage cannot contain symlinks.')
 
 
@@ -88,22 +89,22 @@ def _directory(path, create=False):
     if not path.exists():
         raise ProjectContextError('The manuscript snapshot is not available.')
     info = path.stat()
-    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
+    if not stat.S_ISDIR(info.st_mode) or not owned_by_user(path, info):
         raise ProjectContextError('Invalid private snapshot directory.')
     if create:
-        os.chmod(str(path), 0o700)
-    elif info.st_mode & 0o077:
+        private_permissions(path, 0o700)
+    elif not is_private(path, info):
         raise ProjectContextError('The snapshot directory is not private.')
 
 
 def _read_bytes(path, limit):
     _check_components(path)
     try:
-        descriptor = os.open(str(path), os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
+        descriptor = os.open(str(path), os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_BINARY', 0))
         with os.fdopen(descriptor, 'rb') as stream:
             info = os.fstat(stream.fileno())
-            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
-                    or info.st_mode & 0o077 or info.st_size > limit):
+            if (not stat.S_ISREG(info.st_mode) or not is_private(stream.fileno(), info)
+                    or info.st_size > limit):
                 raise ProjectContextError('Invalid private snapshot file.')
             data = stream.read(limit + 1)
             if len(data) > limit:
@@ -130,16 +131,23 @@ def _atomic_bytes(path, content, immutable=False, replace=False):
     _directory(path.parent)
     _check_components(path)
     temporary = path.parent / ('.new-' + uuid.uuid4().hex)
-    descriptor = os.open(str(temporary), os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, 'O_NOFOLLOW', 0), 0o600)
+    descriptor = os.open(str(temporary), os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_BINARY', 0), 0o600)
     try:
         with os.fdopen(descriptor, 'wb') as stream:
+            private_permissions(stream.fileno(), 0o600)
             stream.write(content); stream.flush(); os.fsync(stream.fileno())
             if immutable:
-                os.fchmod(stream.fileno(), 0o400)
+                private_permissions(stream.fileno(), 0o400)
         if immutable and not replace:
             # link() publishes atomically without ever replacing an existing
             # snapshot, including a maliciously pre-created symlink.
-            os.link(str(temporary), str(path), follow_symlinks=False)
+            if IS_WINDOWS:
+                # Windows rename fails if the destination exists, including a
+                # reparse point. It preserves the immutable ACL and publishes
+                # atomically without the hard-link write-attributes privilege.
+                os.rename(str(temporary), str(path))
+            else:
+                os.link(str(temporary), str(path), follow_symlinks=False)
         else:
             _check_components(path)
             os.replace(str(temporary), str(path))
@@ -153,6 +161,15 @@ def _atomic_bytes(path, content, immutable=False, replace=False):
 class ProjectContextStore:
     def __init__(self, root=DEFAULT_ROOT, read_only=False):
         self.root = Path(root).expanduser().absolute()
+        # Hash-addressed blob paths append two 64-character components. Long
+        # Windows profiles (including MSIX-resolved paths) can therefore exceed
+        # MAX_PATH even when the root itself is accessible. Opt this private
+        # store into Win32 extended paths without requiring a machine policy
+        # change. Check reparse components before changing the spelling.
+        _check_components(self.root)
+        if IS_WINDOWS and len(str(self.root)) > 100 and not str(self.root).startswith('\\\\?\\'):
+            raw = str(self.root)
+            self.root = Path('\\\\?\\UNC\\' + raw[2:] if raw.startswith('\\\\') else '\\\\?\\' + raw)
         self.read_only = read_only
         self.uploads = self.root / 'uploads'
         self.snapshots = self.root / 'snapshots'
@@ -177,10 +194,10 @@ class ProjectContextStore:
             _directory(self.root)
             path = self.root / '.lock'
             _check_components(path)
-            descriptor = os.open(str(path), os.O_CREAT | os.O_RDWR | getattr(os, 'O_NOFOLLOW', 0), 0o600)
+            descriptor = os.open(str(path), os.O_CREAT | os.O_RDWR | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_BINARY', 0), 0o600)
             try:
                 info = os.fstat(descriptor)
-                if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid():
+                if not stat.S_ISREG(info.st_mode) or not owned_by_user(descriptor, info):
                     raise ProjectContextError('Invalid snapshot lock.')
                 fcntl.flock(descriptor, fcntl.LOCK_EX)
                 yield
@@ -299,19 +316,26 @@ class ProjectContextStore:
                 info = directory.lstat()
                 # Do not follow or delete foreign/symlink entries. rmtree also
                 # unlinks child symlinks without traversing their destinations.
-                if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
-                        or info.st_mode & 0o077 or now - info.st_mtime < UPLOAD_IDLE_TTL):
+                if (is_link(directory) or not stat.S_ISDIR(info.st_mode) or not is_private(directory, info)
+                        or now - info.st_mtime < UPLOAD_IDLE_TTL):
                     continue
                 shutil.rmtree(directory)
             except OSError:
                 # An unreadable temporary upload cannot block new questions.
                 continue
 
-    def begin(self, scope, root_path, manifest):
+    def begin(self, scope, root_path, manifest, cache_mode=None, lease_token=None):
         _identifier(scope, HEX, 'project scope')
         entries = _manifest(root_path, manifest)
         upload_id = str(uuid.uuid4())
         with self._lock():
+            if cache_mode is not None:
+                from cache_lifecycle import CacheLifecycle
+                if cache_mode not in ('on-demand', 'persistent'):
+                    raise ProjectContextError('Invalid project cache mode.')
+                CacheLifecycle(self).require_page(scope, lease_token, locked=True)
+                if cache_mode == 'persistent':
+                    CacheLifecycle.validate_mirror_paths(entries, self.root / 'mirrors' / scope / ('0' * 64))
             _directory(self.uploads)
             self._cleanup_idle_uploads()
             directory = self.uploads / upload_id
@@ -319,6 +343,7 @@ class ProjectContextStore:
             _atomic_bytes(directory / 'manifest.json', _json_bytes({
                 'version': 1, 'scope': scope, 'root_path': root_path, 'manifest': entries,
                 'upload_id': upload_id, 'created_at': time.time(),
+                **({'cache_mode': cache_mode, 'lease_token': lease_token} if cache_mode is not None else {}),
             }))
         return upload_id
 
@@ -346,12 +371,18 @@ class ProjectContextStore:
             _atomic_bytes(blob, previous + encoded)
             # Last valid activity, not creation time, controls staging cleanup.
             # Cleanup and writes share the process lock and cross-process flock.
-            os.utime(str(directory), None, follow_symlinks=False)
+            touch_private_directory(directory)
             return {'offset': offset + len(encoded), 'bytes': entry['bytes']}
 
     def commit(self, scope, upload_id):
         with self._lock():
             directory, metadata = self._upload(scope, upload_id)
+            cache_mode = metadata.get('cache_mode')
+            if cache_mode is not None:
+                from cache_lifecycle import CacheLifecycle
+                CacheLifecycle(self).require_page(scope, metadata.get('lease_token'), locked=True)
+                if cache_mode == 'persistent':
+                    CacheLifecycle.validate_mirror_paths(metadata['manifest'], self.root / 'mirrors' / scope / ('0' * 64))
             verified = []
             for entry in metadata['manifest']:
                 blob = self._blob(directory, entry['path'])
@@ -377,6 +408,8 @@ class ProjectContextStore:
             fingerprint = self._fingerprint(scope, metadata['root_path'], metadata['manifest'])
             existing = self._indexed_snapshot(scope, fingerprint)
             if existing:
+                if cache_mode is not None:
+                    CacheLifecycle(self).manage_snapshot(scope, existing, cache_mode, locked=True)
                 shutil.rmtree(directory)
                 return existing
             # Keep unpredictable, immutable capability IDs even though the
@@ -390,6 +423,8 @@ class ProjectContextStore:
                 'version': 1, 'scope': scope, 'fingerprint': fingerprint,
                 'snapshot_id': snapshot_id,
             }))
+            if cache_mode is not None:
+                CacheLifecycle(self).manage_snapshot(scope, snapshot_id, cache_mode, newly_created=True, locked=True)
             shutil.rmtree(directory)
             return snapshot_id
 

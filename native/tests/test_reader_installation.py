@@ -5,6 +5,7 @@ import tempfile
 import threading
 from types import SimpleNamespace
 import unittest
+from platform_test_support import assert_private, make_symlink, private_permissions
 from unittest import mock
 
 from test_codex_host import host, installer, request, THREAD, TURN
@@ -41,7 +42,7 @@ class ReaderInstallationTests(unittest.TestCase):
                 installer.configure_reader_mcp(self.directory, self.executable)
         self.assertEqual(self.marker.read_bytes(), first)
         self.assertEqual(json.loads(first)['registeredAt'], 100)
-        self.assertEqual(self.marker.stat().st_mode & 0o777, 0o600)
+        assert_private(self, self.marker, 0o600)
         self.assertEqual([call.args[0][1:3] for call in run.call_args_list], [['mcp', 'get'], ['mcp', 'get']])
 
     def test_new_registration_replaces_stale_gate_timestamp(self):
@@ -51,6 +52,20 @@ class ReaderInstallationTests(unittest.TestCase):
                 installer.configure_reader_mcp(self.directory, self.executable)
         self.assertEqual(json.loads(self.marker.read_text())['registeredAt'], 200)
         self.assertEqual(run.call_args_list[-1].args[0], [self.executable, 'mcp', 'add', 'overleaf_project', '--', installer.PYTHON, str(self.script)])
+
+    def test_permission_dependency_update_also_requires_reader_restart(self):
+        dependency = self.directory / 'platform_utils.py'
+        dependency.write_text('# synthetic ACL implementation v1\n')
+        with mock.patch.object(installer.subprocess, 'run', return_value=self.registration()):
+            with mock.patch.object(installer.time, 'time', return_value=100):
+                installer.configure_reader_mcp(self.directory, self.executable)
+            first = json.loads(self.marker.read_text())
+            dependency.write_text('# synthetic ACL implementation v2\n')
+            with mock.patch.object(installer.time, 'time', return_value=200):
+                installer.configure_reader_mcp(self.directory, self.executable)
+            second = json.loads(self.marker.read_text())
+        self.assertNotEqual(first['readerDigest'], second['readerDigest'])
+        self.assertEqual(second['registeredAt'], 200)
 
     def test_changed_reader_or_snapshot_decoder_advances_restart_gate_only_once(self):
         decoder = self.directory / 'project_context.py'
@@ -138,6 +153,7 @@ class DesktopReaderStartupTests(unittest.TestCase):
         self.native.store = mock.Mock()
         self.native.store.key.return_value = 'a' * 64
         self.ipc = mock.Mock()
+        self.ipc.peer_started_at = 50
         self.ipc.path.lstat.return_value = SimpleNamespace(st_birthtime=50, st_mtime=150, st_ctime=150)
         self.server = SimpleNamespace(desktop_reader_configured=True, request=mock.Mock(return_value={'data': [{
             'name': 'overleaf_project', 'tools': {name: {'name': name} for name in
@@ -152,6 +168,7 @@ class DesktopReaderStartupTests(unittest.TestCase):
         self.server.request.assert_not_called()
 
     def test_fresh_socket_still_requires_independent_reader_to_be_available(self):
+        self.ipc.peer_started_at = 150
         self.ipc.path.lstat.return_value = SimpleNamespace(st_birthtime=150)
         self.native.verify_desktop_reader_startup(self.server, self.ipc)
         self.assertEqual(self.server.request.call_args.args[0], 'mcpServerStatus/list')
@@ -165,10 +182,12 @@ class DesktopReaderStartupTests(unittest.TestCase):
                         json.dumps({'version': 2, 'registeredAt': 100, 'script': str(self.directory / 'manuscript_mcp.py')}),
                         json.dumps({'version': 1, 'registeredAt': 100, 'script': '/other/reader.py'})]:
             self.marker.write_text(content)
+            self.ipc.peer_started_at = 150
             self.ipc.path.lstat.return_value = SimpleNamespace(st_birthtime=150)
             with self.subTest(content=content), self.assertRaises(host.HostError):
                 self.native.verify_desktop_reader_startup(self.server, self.ipc)
         self.marker.write_text(original)
+        self.ipc.peer_started_at = None
         self.ipc.path.lstat.return_value = SimpleNamespace(st_mtime=150, st_ctime=150)
         with self.assertRaises(host.HostError):
             self.native.verify_desktop_reader_startup(self.server, self.ipc)
@@ -178,6 +197,7 @@ class DesktopReaderStartupTests(unittest.TestCase):
 
     def test_unregistered_reader_is_rejected_even_for_new_desktop(self):
         self.server.desktop_reader_configured = False
+        self.ipc.peer_started_at = 150
         self.ipc.path.lstat.return_value = SimpleNamespace(st_birthtime=150)
         with self.assertRaisesRegex(host.HostError, 'not registered'):
             self.native.verify_desktop_reader_startup(self.server, self.ipc)

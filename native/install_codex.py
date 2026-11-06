@@ -15,7 +15,10 @@ import time
 import sys
 
 HOST_NAME = "com.overleaf.personal_tools.codex"
-PYTHON = "/usr/bin/python3"
+# Script-directory imports also work for importlib-based installer tests.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from platform_utils import IS_WINDOWS, private_permissions, check_components, is_link
+from native_setup import PYTHON, LAUNCH_NAME, paths as host_paths, launcher, prepare_directories, registration
 MARKER = ".overleaf-personal-tools-codex-host.json"
 READER_MARKER = '.reader-registration.json'
 
@@ -32,45 +35,43 @@ def extension_id(manifest):
 
 
 def paths(home):
-    support = home / "Library" / "Application Support"
-    directory = support / "OverleafPersonalTools" / "codex-native-host"
-    manifest = support / "Google" / "Chrome" / "NativeMessagingHosts" / (HOST_NAME + ".json")
-    return directory, manifest
+    return host_paths(home, HOST_NAME, "codex-native-host")
 
 
 def native_manifest(identifier, directory):
-    return {"name": HOST_NAME, "description": "Codex Assistant for Overleaf Personal Tools", "path": str(directory / "launch"), "type": "stdio", "allowed_origins": ["chrome-extension://" + identifier + "/"]}
+    return {"name": HOST_NAME, "description": "Codex Assistant for Overleaf Personal Tools", "path": str(directory / LAUNCH_NAME), "type": "stdio", "allowed_origins": ["chrome-extension://" + identifier + "/"]}
 
 
 def require_owned_directory(directory):
-    if directory.is_symlink():
+    check_components(directory)
+    if is_link(directory):
         raise ValueError("Refusing a symlink at the dedicated native host directory.")
     if directory.exists():
         marker = directory / MARKER
-        if not marker.is_file() or marker.is_symlink() or json.loads(marker.read_text()).get("name") != HOST_NAME:
+        if not marker.is_file() or is_link(marker) or json.loads(marker.read_text()).get("name") != HOST_NAME:
             raise ValueError("Existing native host directory is not marked as owned by this installer.")
 
 
 def install(identifier, source, home, workspace=None, project_id=None):
     directory, manifest_path = paths(home)
     require_owned_directory(directory)
-    if manifest_path.is_symlink():
+    if is_link(manifest_path):
         raise ValueError("Refusing a symlink at the native host manifest.")
     if manifest_path.exists():
         previous = json.loads(manifest_path.read_text())
-        if previous.get("name") != HOST_NAME or previous.get("path") != str(directory / "launch"):
+        if previous.get("name") != HOST_NAME or previous.get("path") != str(directory / LAUNCH_NAME):
             raise ValueError("Existing native host registration belongs to another installation.")
-    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    os.chmod(str(directory), 0o700)
+    prepare_directories(home, directory, manifest_path)
     # Atomic replace avoids following a malicious pre-existing file symlink.
     content = {
         "codex_host.py": source.read_bytes(),
-        "launch": ("#!/bin/sh\nexec " + PYTHON + " " + shlex.quote(str(directory / "codex_host.py")) + "\n").encode(),
+        LAUNCH_NAME: launcher(directory, "codex_host.py"),
         MARKER: (json.dumps({"name": HOST_NAME, "extensionId": identifier}) + "\n").encode(),
     }
     adapters = {}
     for name in ('desktop_ipc.py', 'desktop_state.py', 'api_provider.py', 'prompt_display.py',
-                 'project_context.py', 'manuscript_mcp.py', 'context_transport.py'):
+                 'project_context.py', 'manuscript_mcp.py', 'context_transport.py',
+                 'platform_utils.py', 'windows_desktop.py', 'cache_lifecycle.py'):
         companion = source.parent / name
         # Synthetic installer fixtures may supply only a stub host. Production
         # hosts import both adapters and must ship the matching files atomically.
@@ -81,7 +82,7 @@ def install(identifier, source, home, workspace=None, project_id=None):
     # Install dependencies before publishing the entrypoint that imports them.
     content = dict(adapters, **content)
     workspace_path = directory / 'workspace.json'
-    if workspace_path.is_symlink():
+    if is_link(workspace_path):
         raise ValueError('Refusing a symlink workspace configuration.')
     if workspace is not None:
         workspace = Path(workspace)
@@ -94,18 +95,19 @@ def install(identifier, source, home, workspace=None, project_id=None):
         raise ValueError('--project-id requires --workspace.')
     for name, data in content.items():
         temporary = directory / (name + ".new")
-        if temporary.is_symlink():
+        if is_link(temporary):
             raise ValueError("Unexpected symlink in native host directory.")
         temporary.write_bytes(data)
-        os.chmod(str(temporary), 0o700 if name == "launch" else 0o600)
+        private_permissions(temporary, 0o700 if name == LAUNCH_NAME else 0o600)
         os.replace(str(temporary), str(directory / name))
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     temporary = manifest_path.with_suffix(".json.new")
-    if temporary.is_symlink():
+    if is_link(temporary):
         raise ValueError("Unexpected native manifest staging symlink.")
-    temporary.write_text(json.dumps(native_manifest(identifier, directory), indent=2) + "\n")
-    os.chmod(str(temporary), 0o600)
+    temporary.write_text(json.dumps(native_manifest(identifier, directory), indent=2) + "\n", encoding="utf-8")
+    private_permissions(temporary, 0o600)
     os.replace(str(temporary), str(manifest_path))
+    registration(home, HOST_NAME, manifest_path)
     return directory, manifest_path
 
 
@@ -136,16 +138,16 @@ def configure_reader_mcp(directory, executable):
     # startup gate. Re-registering a CLI cannot reload an existing reader process.
     # Include names/separators so missing/replaced dependencies cannot collide.
     reader_digest = hashlib.sha256()
-    for name in ('manuscript_mcp.py', 'project_context.py'):
+    for name in ('manuscript_mcp.py', 'project_context.py', 'platform_utils.py', 'cache_lifecycle.py'):
         path = directory / name
-        if path.is_symlink():
+        if is_link(path):
             raise ValueError('Unexpected project reader source symlink.')
         reader_digest.update(name.encode('ascii') + b'\0')
         reader_digest.update(path.read_bytes() if path.is_file() else b'<missing>')
         reader_digest.update(b'\0')
     reader_digest = reader_digest.hexdigest()
     marker = directory / READER_MARKER
-    if marker.is_symlink():
+    if is_link(marker):
         raise ValueError('Unexpected project reader registration symlink.')
     valid_marker = False
     if marker.exists():
@@ -159,10 +161,11 @@ def configure_reader_mcp(directory, executable):
             pass
     if current.returncode != 0 or not valid_marker:
         temporary = directory / (READER_MARKER + '.new')
-        if temporary.is_symlink():
+        if is_link(temporary):
             raise ValueError('Unexpected reader marker staging symlink.')
-        descriptor = os.open(str(temporary), os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, 'O_NOFOLLOW', 0), 0o600)
-        with os.fdopen(descriptor, 'w') as stream:
+        descriptor = os.open(str(temporary), os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_BINARY', 0), 0o600)
+        with os.fdopen(descriptor, 'w', encoding='utf-8') as stream:
+            private_permissions(stream.fileno(), 0o600)
             json.dump({'version': 1, 'registeredAt': time.time(), 'script': script,
                        'readerDigest': reader_digest}, stream)
         os.replace(str(temporary), str(marker))
@@ -189,13 +192,16 @@ def unregister_reader_mcp(directory, executable):
 
 def uninstall(home):
     directory, manifest_path = paths(home)
+    check_components(manifest_path)
     require_owned_directory(directory)
-    if manifest_path.is_symlink():
+    if is_link(manifest_path):
         raise ValueError("Refusing to remove a symlink native host registration.")
     if manifest_path.exists():
         current = json.loads(manifest_path.read_text())
-        if current.get("name") != HOST_NAME or current.get("path") != str(directory / "launch"):
+        if current.get("name") != HOST_NAME or current.get("path") != str(directory / LAUNCH_NAME):
             raise ValueError("Refusing to remove another native host installation.")
+    registration(home, HOST_NAME, manifest_path, remove=True)
+    if manifest_path.exists():
         manifest_path.unlink()
     if directory.exists():
         shutil.rmtree(str(directory))

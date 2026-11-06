@@ -4,7 +4,7 @@ Credentials never enter the website, display history, returned metadata or error
 messages. The caller's native host owns request validation and browser admission.
 """
 import contextlib
-import fcntl
+from platform_utils import fcntl, is_link, owned_by_user, private_permissions, check_components
 import hashlib
 import http.client
 import ipaddress
@@ -115,13 +115,14 @@ def normalize_base_url(value):
 
 
 def _private_directory(path):
-    if path.is_symlink():
+    check_components(path)
+    if is_link(path):
         raise APIError('The API connection directory cannot be a symlink.')
     path.mkdir(mode=0o700, parents=True, exist_ok=True)
     info = path.stat()
-    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
+    if not stat.S_ISDIR(info.st_mode) or not owned_by_user(path, info):
         raise APIError('The API connection directory must belong to this user.')
-    os.chmod(str(path), 0o700)
+    private_permissions(path, 0o700)
 
 
 class ProfileStore:
@@ -133,29 +134,30 @@ class ProfileStore:
     @contextlib.contextmanager
     def _lock(self):
         path = self.root / 'profiles.lock'
-        descriptor = os.open(str(path), os.O_RDWR | os.O_CREAT | getattr(os, 'O_NOFOLLOW', 0), 0o600)
+        check_components(path)
+        descriptor = os.open(str(path), os.O_RDWR | os.O_CREAT | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_BINARY', 0), 0o600)
         try:
             info = os.fstat(descriptor)
-            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid():
+            if not stat.S_ISREG(info.st_mode) or not owned_by_user(descriptor, info):
                 raise APIError('Invalid API connection storage.')
-            os.fchmod(descriptor, 0o600)
+            private_permissions(descriptor, 0o600)
             fcntl.flock(descriptor, fcntl.LOCK_EX)
             yield
         finally:
             os.close(descriptor)
 
     def _read(self):
-        if self.path.is_symlink():
+        if is_link(self.path):
             raise APIError('Invalid API connection storage.')
         if not self.path.exists():
             return []
         try:
-            descriptor = os.open(str(self.path), os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
+            descriptor = os.open(str(self.path), os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_BINARY', 0))
             with os.fdopen(descriptor, 'r', encoding='utf-8') as stream:
                 info = os.fstat(stream.fileno())
-                if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_size > 1024 * 1024:
+                if not stat.S_ISREG(info.st_mode) or not owned_by_user(stream.fileno(), info) or info.st_size > 1024 * 1024:
                     raise APIError('Invalid API connection storage.')
-                os.fchmod(stream.fileno(), 0o600)
+                private_permissions(stream.fileno(), 0o600)
                 rows = json.load(stream)
             if not isinstance(rows, list) or len(rows) > PROFILE_LIMIT:
                 raise ValueError()
@@ -197,10 +199,10 @@ class ProfileStore:
         descriptor, temporary = tempfile.mkstemp(prefix='.profiles-', dir=str(self.root))
         try:
             with os.fdopen(descriptor, 'w', encoding='utf-8') as stream:
-                os.fchmod(stream.fileno(), 0o600)
+                private_permissions(stream.fileno(), 0o600)
                 json.dump(rows, stream, ensure_ascii=False)
                 stream.flush(); os.fsync(stream.fileno())
-            if self.path.is_symlink():
+            if is_link(self.path):
                 raise APIError('Invalid API connection storage.')
             os.replace(temporary, str(self.path))
         finally:
@@ -316,6 +318,48 @@ class APIConnection:
                 self.timed_out = not self.cancelled.is_set()
                 self.close(); return
 
+    def _interruptible_response(self, sock, *args, **kwargs):
+        # Winsock shutdown may leave a timed recv blocked when HTTPResponse
+        # owns the last makefile reference (Connection: close). Poll inside
+        # the raw reader: letting a timeout escape socket.makefile would
+        # permanently poison BufferedReader and lose partial HTTP/SSE lines.
+        import io
+        owner = self
+        idle_timeout = sock.gettimeout() or 30
+        sock.settimeout(min(.1, idle_timeout))
+
+        class Reader(io.RawIOBase):
+            def __init__(self):
+                # Public makefile reference keeps the socket alive when
+                # HTTPConnection detaches it after parsing the headers.
+                self.reference = sock.makefile('rb', buffering=0)
+
+            def readable(self):
+                return True
+
+            def readinto(self, buffer):
+                until = time.monotonic() + idle_timeout
+                while True:
+                    owner._ensure_live()
+                    try:
+                        return sock.recv_into(buffer)
+                    except socket.timeout:
+                        owner._ensure_live()
+                        if time.monotonic() >= until:
+                            raise
+
+            def close(self):
+                try:
+                    self.reference.close()
+                finally:
+                    super().close()
+
+        class ResponseSocket:
+            def makefile(self, mode):
+                return io.BufferedReader(Reader())
+
+        return http.client.HTTPResponse(ResponseSocket(), *args, **kwargs)
+
     def _open(self, method, suffix, payload=None):
         self._ensure_live()
         parsed = urlsplit(self.profile['baseUrl'])
@@ -355,6 +399,8 @@ class APIConnection:
             # HTTPResponse may detach a Connection: close socket from the
             # connection object. The retained socket still permits stopping it.
             self._ensure_live(connection)
+            if os.name == 'nt' and isinstance(connection.sock, socket.socket):
+                connection.response_class = self._interruptible_response
             response = connection.getresponse()
             if not 200 <= response.status < 300:
                 # Never expose upstream bodies: gateways may echo Authorization.

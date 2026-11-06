@@ -152,6 +152,7 @@ class SourceHostTests(unittest.TestCase):
     def test_existing_desktop_cannot_silently_accept_a_snapshot_before_reader_load(self):
         server = mock.Mock(desktop_reader_configured=True)
         ipc = mock.Mock()
+        ipc.peer_started_at = 10
         ipc.path.lstat.return_value = SimpleNamespace(st_birthtime=10)
         with mock.patch.object(Path, 'read_text', return_value=json.dumps({'version': 1, 'script': str(Path(host.__file__).resolve().parent / 'manuscript_mcp.py'), 'registeredAt': 20})), mock.patch.object(Path, 'is_symlink', return_value=False):
             with self.assertRaisesRegex(host.HostError, 'Restart Codex Desktop once'):
@@ -163,6 +164,7 @@ class SourceHostTests(unittest.TestCase):
         names = ['list_project_files', 'search_project', 'read_project_file']
         server.request.return_value = {'data': [{'name': 'overleaf_project', 'tools': {name: {'name': name} for name in names}}]}
         ipc = mock.Mock()
+        ipc.peer_started_at = time.time()
         ipc.path.lstat.return_value = SimpleNamespace(st_birthtime=time.time())
         with mock.patch.object(Path, 'read_text', return_value=json.dumps({'version': 1, 'script': str(Path(host.__file__).resolve().parent / 'manuscript_mcp.py'), 'registeredAt': 20})), mock.patch.object(Path, 'is_symlink', return_value=False):
             self.host.verify_desktop_reader_startup(server, ipc)

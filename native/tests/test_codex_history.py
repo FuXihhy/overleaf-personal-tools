@@ -7,6 +7,7 @@ import time
 import unittest
 from unittest import mock
 from test_codex_host import host, installer, ROOT, request, FakeServer, Messages, PROJECT, THREAD
+from platform_utils import is_private
 
 OTHER = '99999999-2222-3333-4444-555555555555'
 
@@ -36,7 +37,7 @@ class HistoryStoreTests(unittest.TestCase):
         self.assertEqual(page['messages'][0]['selection']['text'], 'x+y')
         self.assertEqual(page['messages'][0]['text'], 'Original question')
         self.assertFalse(old.exists())
-        self.assertEqual((self.store.root / 'history.sqlite3').stat().st_mode & 0o777, 0o600)
+        self.assertTrue(is_private(self.store.root / 'history.sqlite3'))
 
     def test_migrates_old_message_schema_and_preserves_both_quote_kinds(self):
         # Make the exact pre-answer-quotation table, with an existing row.
@@ -114,7 +115,12 @@ class HistoryStoreTests(unittest.TestCase):
 
     def test_database_symlinks_are_not_followed(self):
         target = Path(self.temp.name) / 'unrelated'; target.write_text('unchanged')
-        (self.store.root / 'history.sqlite3').symlink_to(target)
+        try:
+            (self.store.root / 'history.sqlite3').symlink_to(target)
+        except OSError as error:
+            if getattr(error, 'winerror', None) == 1314:
+                self.skipTest('Windows user lacks symlink creation privilege; junction attacks have separate tests.')
+            raise
         with self.assertRaises(host.HostError): self.store.read(request())
         self.assertEqual(target.read_text(), 'unchanged')
 
@@ -370,7 +376,16 @@ class WorkspaceTests(unittest.TestCase):
                           {'workspace': str(root), 'projectId': 'bad'}, {'workspace': str(root), 'command': 'bad'}):
                 config.write_text(json.dumps(value))
                 with self.assertRaises(host.HostError): host.workspace_configuration(root, config)
-            config.unlink(); target = root/'other'; target.write_text('{}'); config.symlink_to(target)
+    def test_workspace_configuration_rejects_symlink(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); config = root/'workspace.json'
+            target = root/'other'; target.write_text('{}')
+            try:
+                config.symlink_to(target)
+            except OSError as error:
+                if getattr(error, 'winerror', None) == 1314:
+                    self.skipTest('Windows user lacks symlink creation privilege; junction attacks have separate tests.')
+                raise
             with self.assertRaises(host.HostError): host.workspace_configuration(root, config)
 
     def test_start_and_resume_use_configured_workspace_but_private_history_root(self):
@@ -402,7 +417,7 @@ class WorkspaceTests(unittest.TestCase):
             directory, _ = installer.install('a'*32, source, root, workspace, OTHER)
             path = directory/'workspace.json'; original = path.read_text()
             self.assertEqual(json.loads(original), {'workspace': str(workspace.resolve()), 'projectId': OTHER})
-            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertTrue(is_private(path))
             installer.install('a'*32, source, root)
             self.assertEqual(path.read_text(), original)
 

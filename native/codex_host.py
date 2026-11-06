@@ -8,7 +8,6 @@ strings never become command-line arguments or arbitrary local paths.
 import base64
 import binascii
 import contextlib
-import fcntl
 import hashlib
 import json
 import os
@@ -26,14 +25,16 @@ import uuid
 
 # The installer ships these private, dependency-free adapters beside this file.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from platform_utils import fcntl, support_directory, private_directory, private_permissions, is_link
 from desktop_ipc import DesktopIPC, DesktopIPCError
 from desktop_state import DesktopThreadState, DesktopAnswerTooLarge
 from api_provider import ProfileStore, APIBackend, APIError, API_BUDGET_LIMITS, api_reading_budget
 from prompt_display import parse_generated_question
 from project_context import ProjectContextError, ProjectContextStore
+from cache_lifecycle import CacheLifecycle, CACHE_OPERATIONS, CACHE_FIELDS, validate_cache_request
 from context_transport import MAX_VALUE_BYTES, build_additional_context
 
-VERSION = "0.12.12"
+VERSION = "0.12.15"
 HOST_NAME = "com.overleaf.personal_tools.codex"
 # A 2,000-entry Unicode path manifest can exceed 2 MiB even with no content.
 # Individual operations retain their tighter validated limits.
@@ -164,7 +165,7 @@ def quotation_bytes(selection=None, answer_quote=None):
 def validate_request(value):
     if not isinstance(value, dict) or type(value.get("version")) is not int or value.get("version") != 1 or not isinstance(value.get("id"), str) or not ID_RE.fullmatch(value["id"]):
         raise HostError("Invalid request envelope.")
-    if set(value) - {"version", "id", "op", "projectId", "accountId", "question", "selection", "answerQuote", "files", "settings", "conversationId", "cursor", "limit", "expectedConversationId", "expectedSyncRevision", "providerId", "profile", "expectedTurnId", "snapshotId", "sourceManifest", "rootPath", "uploadId", "path", "offset", "content"}:
+    if set(value) - ({"version", "id", "op", "projectId", "accountId", "question", "selection", "answerQuote", "files", "settings", "conversationId", "cursor", "limit", "expectedConversationId", "expectedSyncRevision", "providerId", "profile", "expectedTurnId", "snapshotId", "sourceManifest", "rootPath", "uploadId", "path", "offset", "content"} | CACHE_FIELDS):
         raise HostError("Unknown request fields.")
     op = value.get("op")
     provider = value.get('providerId')
@@ -187,7 +188,7 @@ def validate_request(value):
         return dict(value)
     if 'profile' in value:
         raise HostError('API credentials belong in the extension connection settings.')
-    if op not in ("status", "ask", "steer", "cancel", "new-chat", "history-list", "history-read", "history-select", "source-begin", "source-chunk", "source-commit", "source-check"):
+    if op not in ("status", "ask", "steer", "cancel", "new-chat", "history-list", "history-read", "history-select", "source-begin", "source-chunk", "source-commit", "source-check") and op not in CACHE_OPERATIONS:
         raise HostError("Unknown request operation.")
     result = {"version": 1, "id": value["id"], "op": op}
     if provider is not None:
@@ -202,8 +203,13 @@ def validate_request(value):
     if account is not None and (not isinstance(account, str) or not ID_RE.fullmatch(account)):
         raise HostError("Invalid Overleaf account identity.")
     result["accountId"] = account
+    if op in CACHE_OPERATIONS:
+        try:
+            return validate_cache_request(value, result)
+        except ProjectContextError as error:
+            raise HostError(str(error)) from error
     if op.startswith('source-'):
-        fields = {'source-begin': {'sourceManifest', 'rootPath'},
+        fields = {'source-begin': {'sourceManifest', 'rootPath', 'cacheMode', 'leaseToken'},
                   'source-chunk': {'uploadId', 'path', 'offset', 'content'},
                   'source-commit': {'uploadId'}, 'source-check': {'snapshotId'}}[op]
         if set(value) - ({'version', 'id', 'op', 'projectId', 'accountId'} | fields):
@@ -219,6 +225,10 @@ def validate_request(value):
                 raise HostError('Invalid project snapshot identity.')
             result['snapshotId'] = snapshot_id
         elif op == 'source-begin':
+            if 'cacheMode' in value or 'leaseToken' in value:
+                if value.get('cacheMode') not in ('on-demand', 'persistent') or not isinstance(value.get('leaseToken'), str) or not ID_RE.fullmatch(value['leaseToken']):
+                    raise HostError('A registered page and valid cache mode are required.')
+                result.update(cacheMode=value['cacheMode'], leaseToken=value['leaseToken'])
             manifest = value.get('sourceManifest')
             if not isinstance(manifest, list) or len(manifest) > 2000:
                 raise HostError('Invalid project source manifest.')
@@ -250,7 +260,7 @@ def validate_request(value):
                 raise HostError('Invalid Unicode in project source chunk.') from None
             result.update(offset=offset, content=content)
         return result
-    if set(value) & {'sourceManifest', 'rootPath', 'uploadId', 'path', 'offset', 'content'}:
+    if set(value) & ({'sourceManifest', 'rootPath', 'uploadId', 'path', 'offset', 'content'} | CACHE_FIELDS):
         raise HostError('Source upload fields cannot be used for this operation.')
     if op.startswith("history-"):
         allowed = {"version", "id", "op", "projectId", "accountId", "cursor", "limit", "providerId"}
@@ -345,7 +355,7 @@ def validate_request(value):
         checked.append({"path": path, "content": content})
     result["files"] = checked
     settings = value.get("settings", {})
-    if not isinstance(settings, dict) or set(settings) - ({"enabled", "model", "apiModel", "effort", "instructions", "contextMode", "providerId"} | set(API_BUDGET_LIMITS)):
+    if not isinstance(settings, dict) or set(settings) - ({"enabled", "model", "apiModel", "effort", "instructions", "contextMode", "cacheMode", "providerId"} | set(API_BUDGET_LIMITS)):
         raise HostError("Invalid assistant settings.")
     settings = dict(settings)
     if settings.get('providerId') is not None and settings.get('providerId') != provider:
@@ -367,6 +377,12 @@ def validate_request(value):
     settings["effort"] = settings.get("effort", "")
     settings["instructions"] = text(settings.get("instructions", ""), 8000, "project instructions")
     settings["contextMode"] = text(settings.get("contextMode", ""), 40, "context mode")
+    if 'cacheMode' in settings:
+        if settings['cacheMode'] not in ('normal', 'on-demand', 'persistent'):
+            raise HostError('Invalid cache mode.')
+        expected = 'selection' if settings['cacheMode'] == 'normal' else 'project'
+        if settings['contextMode'] != expected or expected == 'selection' and 'snapshotId' in value:
+            raise HostError('The context mode does not match the requested source lifetime.')
     result["settings"] = settings
     return result
 
@@ -410,6 +426,12 @@ def write_message(stream, value):
 
 def codex_path():
     # Known local installations only; the browser cannot select an executable.
+    if os.name == 'nt':
+        from windows_desktop import codex_executable
+        try:
+            return codex_executable()
+        except OSError as error:
+            raise HostError(str(error)) from error
     candidates = (
         "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
         "/Applications/Codex.app/Contents/Resources/codex",
@@ -470,7 +492,8 @@ def server_command(executable):
 def project_reader_override():
     """The sole integration allowed inside the private manuscript reader."""
     script = str(Path(__file__).resolve().parent / 'manuscript_mcp.py')
-    return 'mcp_servers.overleaf_project={command="/usr/bin/python3",args=[' + json.dumps(script) + '],enabled=true,required=true}'
+    python = sys.executable if os.name == 'nt' else '/usr/bin/python3'
+    return 'mcp_servers.overleaf_project={command=' + json.dumps(python) + ',args=[' + json.dumps(script) + '],enabled=true,required=true}'
 
 
 class _RpcProcess:
@@ -478,9 +501,23 @@ class _RpcProcess:
         command = server_command(executable or codex_path())
         for value in overrides:
             command += ["-c", value]
+        # CREATE_SUSPENDED (0x4) ensures all descendants enter our Job before
+        # any helper code runs. The adapter resumes only this new process.
+        options = {'creationflags': subprocess.CREATE_NO_WINDOW | 0x4} if os.name == 'nt' else {'start_new_session': True}
         self.process = subprocess.Popen(command, stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, cwd=str(cwd),
-                                        start_new_session=True, bufsize=0)
+                                        bufsize=0, **options)
+        self.job = None
+        if os.name == 'nt':
+            from windows_desktop import ProcessJob
+            try:
+                self.job = ProcessJob(self.process, suspended=True)
+            except Exception:
+                self.process.kill()
+                self.process.wait(timeout=2)
+                self.process.stdin.close()
+                self.process.stdout.close()
+                raise
         self.lock = threading.Lock()
         self.pending = {}
         self.pending_lock = threading.Lock()
@@ -573,6 +610,20 @@ class _RpcProcess:
             self.process.stdin.close()
         except OSError:
             pass
+        if os.name == 'nt':
+            if self.job:
+                self.job.close()
+                self.job = None
+            else:
+                self.process.terminate()
+            try:
+                self.process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait(timeout=2)
+            self.reader.join(timeout=2)
+            self.process.stdout.close()
+            return
         try:
             os.killpg(self.process.pid, signal.SIGTERM)
             self.process.wait(timeout=2)
@@ -613,7 +664,7 @@ class AppServer:
                     reader = entries.get('overleaf_project') or {}
                     self.desktop_reader_configured = (isinstance(reader, dict)
                         and reader.get('enabled', True) is True
-                        and reader.get('command') == '/usr/bin/python3'
+                        and reader.get('command') == (sys.executable if os.name == 'nt' else '/usr/bin/python3')
                         and reader.get('args') == [str(Path(__file__).resolve().parent / 'manuscript_mcp.py')])
                 disabled = []
                 for name in entries:
@@ -657,11 +708,10 @@ class SessionStore:
     PAGE_BYTES = 680000
 
     def __init__(self, root=None):
-        self.root = root or Path.home() / "Library/Application Support/OverleafPersonalTools/codex-assistant"
-        if self.root.is_symlink():
+        self.root = root or support_directory() / 'codex-assistant'
+        if is_link(self.root):
             raise HostError("The Codex assistant directory cannot be a symlink.")
-        self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        os.chmod(str(self.root), 0o700)
+        private_directory(self.root)
         self.transient = None
         self.database_lock = threading.RLock()
 
@@ -675,10 +725,11 @@ class SessionStore:
     @contextlib.contextmanager
     def lock(self, request):
         path = self.root / (self.key(request) + ".lock")
-        if path.is_symlink():
+        if is_link(path):
             raise HostError("Invalid project lock.")
-        descriptor = os.open(str(path), os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        descriptor = os.open(str(path), os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0) | getattr(os, 'O_BINARY', 0), 0o600)
         try:
+            private_permissions(descriptor, 0o600)
             try:
                 fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError as error:
@@ -694,10 +745,12 @@ class SessionStore:
             if persistent:
                 path = self.root / "history.sqlite3"
                 for suffix in ("", "-journal", "-wal", "-shm"):
-                    if Path(str(path) + suffix).is_symlink():
+                    if is_link(Path(str(path) + suffix)):
                         raise HostError("Invalid project history database.")
-                descriptor = os.open(str(path), os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
-                os.fchmod(descriptor, 0o600)
+                # CRT text mode can strip a trailing Ctrl-Z on O_RDWR open,
+                # corrupting a valid SQLite page before sqlite3 sees the file.
+                descriptor = os.open(str(path), os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0) | getattr(os, 'O_BINARY', 0), 0o600)
+                private_permissions(descriptor, 0o600)
                 os.close(descriptor)
                 db = sqlite3.connect(str(path), timeout=5)
             else:
@@ -744,7 +797,7 @@ class SessionStore:
     def _migrate_binding(self, db, request):
         scope = self.key(request)
         path = self.path(request)
-        if request.get("accountId") and path.is_symlink():
+        if request.get("accountId") and is_link(path):
             raise HostError("Invalid project conversation state.")
         if db.execute("SELECT 1 FROM scopes WHERE scope=?", (scope,)).fetchone():
             return
@@ -1096,7 +1149,7 @@ def parse_history_question(value, project):
 
 def workspace_configuration(default, path=None):
     path = path or Path(__file__).with_name('workspace.json')
-    if path.is_symlink():
+    if is_link(path):
         raise HostError('Invalid local workspace configuration.')
     if not path.exists():
         return default, None
@@ -1124,6 +1177,8 @@ class NativeHost:
         # SessionStore has already admitted its owned base directory. Resolve
         # macOS /var -> /private/var before enforcing reader-child boundaries.
         self.project_context = ProjectContextStore(self.store.root.resolve() / 'project-context')
+        self.cache = CacheLifecycle(self.project_context)
+        self.source_requests = {}
         self.workspace, self.project_id = workspace_configuration(self.store.root, workspace_config)
         self.server_factory = server_factory
         self.server = None
@@ -1154,6 +1209,23 @@ class NativeHost:
         self.worker.start()
 
     def emit(self, request_id, kind, **fields):
+        source = self.source_requests.get(request_id)
+        if source and source.get('providerId'):
+            if kind == 'started':
+                # APIBackend persists its exact pending turn before this event.
+                store = self.api_backend.store_for(source)
+                with store.database(source) as db:
+                    row = db.execute('SELECT id FROM api_turns WHERE scope=? AND conversation=? ORDER BY seq DESC LIMIT 1',
+                                     (store.key(source), fields.get('threadId'))).fetchone()
+                if row:
+                    self._source_dispatched(source)
+                    self._source_accepted(source, fields['threadId'], row['id'])
+            elif kind == 'done':
+                if self.active_thread and self.active_turn:
+                    self._source_terminal(source, self.active_thread, self.active_turn,
+                                          'cancelled' if fields.get('cancelled') else 'completed')
+                elif not source.get('_source_dispatched'):
+                    self._source_rejected(source)
         # Deliver a worker's terminal event only after its lock and busy state
         # have been released. A browser may immediately submit the next turn
         # from its done/status/error callback.
@@ -1166,6 +1238,92 @@ class NativeHost:
         with self.output_lock:
             if not self.closed.is_set():
                 write_message(self.output, dict({"id": request_id, "type": kind}, **fields))
+
+    def _source_dispatched(self, request):
+        if request.get('_source_pin'):
+            self.cache.uncertain_turn(self.store.key(request), request['_source_pin'])
+            request['_source_dispatched'] = True
+
+    def _source_accepted(self, request, thread, turn):
+        if request.get('_source_pin'):
+            self.cache.accept_turn(self.store.key(request), request['_source_pin'], thread, turn)
+
+    def _source_terminal(self, request, thread, turn, status):
+        scope = self.store.key(request)
+        try:
+            self.cache.finish_turn(scope, thread, turn, status)
+        except (ProjectContextError, OSError):
+            # Cleanup failure is conservative retention. A confirmed model
+            # answer must still be delivered; cache-info reports storage errors.
+            pass
+
+    def _source_rejected(self, request, confirmed=False):
+        if request.get('_source_pin'):
+            try:
+                self.cache.reject_before_submission(self.store.key(request), request['_source_pin'], confirmed_rejection=confirmed)
+            except (ProjectContextError, OSError):
+                pass  # Keep the durable pin if cleanup cannot be verified.
+
+    def _reconcile_source_turns(self, request):
+        if self.busy:
+            return
+        scope = self.store.key(request)
+        pins = self.cache.pins(scope)
+        server = None
+        eligible = [(key, pin) for key, pin in pins.items() if pin['kind'] == 'turn' and pin['thread']]
+        for key, pin in eligible[:32]:
+            try:
+                if key.startswith('api:'):
+                    provider = key.split(':')[1]
+                    root = self.store.root / 'api' / provider
+                    if not root.is_dir():
+                        continue
+                    store = SessionStore(root)
+                    with store.database(request) as db:
+                        row = db.execute('SELECT status FROM api_turns WHERE scope=? AND conversation=? AND id=?',
+                                         (scope, pin['thread'], pin['turn'])).fetchone()
+                    if row and row['status'] in ('completed', 'cancelled', 'failed'):
+                        self.cache.finish_turn(scope, pin['thread'], pin['turn'], row['status'])
+                else:
+                    server = server or self.connect()
+                    turn = self._desktop_turn(server, pin['thread'], pin['turn'])
+                    # An independent reader can label an active Desktop turn
+                    # interrupted; only persisted completion/failure proves exit.
+                    if turn and turn.get('status') in ('completed', 'failed'):
+                        self.cache.finish_turn(scope, pin['thread'], pin['turn'], turn['status'])
+            except (HostError, OSError, ValueError, sqlite3.Error):
+                continue  # Unknown is protection, never deletion permission.
+
+    def _cache_operation(self, request):
+        scope, op = self.store.key(request), request['op']
+        if op == 'source-page-acquire':
+            self.cache.acquire_page(scope, request['browserId'], request['documentId'], request['leaseToken'], request.get('previousLeaseToken'))
+        elif op == 'source-page-release':
+            self.cache.release_page(scope, request['browserId'], request['documentId'], request['leaseToken'], confirmed_departure=True)
+        elif op == 'source-page-reconcile':
+            self.cache.reconcile_browser(scope, request['browserId'], request['documents'], inventory_complete=True)
+        elif op == 'source-queue-pin':
+            self.cache.pin(scope, 'queue:' + request['queueId'], request['snapshotId'], kind='queue')
+        elif op == 'source-queue-release':
+            self.cache.release_queue(scope, 'queue:' + request['queueId'])
+        elif op == 'source-cache-clear':
+            return self.cache.clear(scope, request['cacheRevision'])
+        elif op == 'source-cache-open':
+            info = self.cache.info(scope)
+            if not info['folder']:
+                raise ProjectContextError('No retained project mirror is available.')
+            folder = Path(info['folder'])
+            from platform_utils import check_components
+            check_components(folder)
+            if os.name == 'nt':
+                os.startfile(str(folder))
+            else:
+                subprocess.Popen(['/usr/bin/open', str(folder)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return info
+        if op == 'source-cache-sweep':
+            self._reconcile_source_turns(request)
+            return self.cache.sweep(scope)
+        return self.cache.info(scope)
 
     def connect(self, fresh=False, deadline=None):
         # Observe only credential-file metadata; never read or expose secrets.
@@ -1197,8 +1355,10 @@ class NativeHost:
         if request['op'].startswith('source-'):
             try:
                 scope = self.store.key(request)
-                if request['op'] == 'source-begin':
-                    upload_id = self.project_context.begin(scope, request['rootPath'], request['sourceManifest'])
+                if request['op'] in CACHE_OPERATIONS:
+                    self.emit(request['id'], 'source', cacheInfo=self._cache_operation(request))
+                elif request['op'] == 'source-begin':
+                    upload_id = self.project_context.begin(scope, request['rootPath'], request['sourceManifest'], request.get('cacheMode'), request.get('leaseToken'))
                     missing = self.project_context.missing_paths(scope, upload_id)
                     # Very many long Unicode paths can exceed Chrome's native
                     # response cap. Omitting the optional optimization falls
@@ -1260,6 +1420,9 @@ class NativeHost:
             kind = 'steered'
         except Exception as error:
             kind, fields = 'error', {'message': safe_error(error)}
+        finally:
+            self._source_rejected(request)
+            self.source_requests.pop(request['id'], None)
         with self.state_lock:
             self.steer_pending = False
         self.emit(request['id'], kind, **fields)
@@ -1269,6 +1432,12 @@ class NativeHost:
         snapshot_id = request.get('snapshotId')
         if not snapshot_id:
             return
+        # Admission and deletion use the same cross-process lock. A version
+        # cannot disappear between validation and the durable provisional pin.
+        pin = ('api:' + request['providerId'] + ':' if request.get('providerId') else 'turn:') + uuid.uuid4().hex
+        self.cache.pin(self.store.key(request), pin, snapshot_id)
+        request['_source_pin'] = pin
+        self.source_requests[request['id']] = request
         snapshot = self.project_context.get(self.store.key(request), snapshot_id)
         request['projectSnapshot'] = {
             'snapshot_id': snapshot_id,
@@ -1311,7 +1480,9 @@ class NativeHost:
                 raise ValueError()
             # The socket's birth time is a conservative startup boundary on
             # macOS. mtime/ctime are not substitutes: metadata updates change them.
-            born = getattr(ipc.path.lstat(), 'st_birthtime', None)
+            born = getattr(ipc, 'peer_started_at', None) if os.name == 'nt' else getattr(ipc.path.lstat(), 'st_birthtime', None)
+            if type(born) not in (int, float):
+                raise ValueError()
             if born is None or born < registered:
                 raise ValueError()
         except (OSError, ValueError, KeyError, TypeError, AttributeError):
@@ -1345,6 +1516,7 @@ class NativeHost:
                       'input': [{'type': 'text', 'text': request['question']}],
                       'additionalContext': additional_context(request)}
             try:
+                self._source_dispatched(request)
                 if desktop:
                     prompt = params['input'][0]['text']
                     restore = {'id': client_id, 'text': request['question'], 'createdAt': int(time.time() * 1000),
@@ -1359,11 +1531,13 @@ class NativeHost:
             except Exception as error:
                 value = str(error).lower()
                 if 'no active turn' in value or 'expected active turn' in value or 'turn id mismatch' in value or 'active turn already ended' in value:
+                    self._source_rejected(request, confirmed=True)
                     raise HostError('The answer finished or changed before steering. Your message was not automatically queued; send it as a follow-up.') from error
                 raise HostError('Codex did not confirm this steering message. It may already have been received; check the conversation before retrying. It was not automatically resent or queued.') from error
             accepted_turn = result.get('turnId')
             if not isinstance(accepted_turn, str) or not accepted_turn or len(accepted_turn) > 200 or not desktop and accepted_turn != turn_id:
                 raise HostError('Codex did not confirm the expected turn for this steering message. Check the conversation before retrying; it was not resent.')
+            self._source_accepted(request, thread_id, accepted_turn)
             index = self.active_user_count
             self.active_user_count += 1
             key = (accepted_turn + ':steer:' + client_id) if desktop else turn_id + ':user' + (':' + str(index) if index else '')
@@ -1444,10 +1618,19 @@ class NativeHost:
                 rejected = source_rejected or (request['op'] == 'ask' and not self.active_turn
                             and isinstance(error, AppServerRPCError)
                             and error.method == 'turn/start' and error.code in (-32600, -32602))
+                self._source_rejected(request, confirmed=rejected)
                 self.emit(request["id"], "error", message=safe_error(error),
                           **({'errorCode': 'source_unavailable'} if source_rejected else {}),
                           **({'notAccepted': True} if rejected else {}))
             finally:
+                # Pre-dispatch validation/cancellation can release only a
+                # provisional pin. Accepted/unknown outcomes survive restart.
+                self._source_rejected(request)
+                if request.get('providerId') and request.get('_source_dispatched') and self.active_thread and self.active_turn:
+                    # APIBackend has exited its tool loop and closed its socket;
+                    # no further local source reads can occur for this turn.
+                    self._source_terminal(request, self.active_thread, self.active_turn, 'failed')
+                self.source_requests.pop(request['id'], None)
                 terminal = self.terminal_event
                 self.terminal_event = None
                 with self.state_lock:
@@ -1733,6 +1916,7 @@ class NativeHost:
             turn_params["model"] = settings["model"]
         if settings["effort"]:
             turn_params["effort"] = settings["effort"]
+        self._source_dispatched(request)
         result = server.request("turn/start", turn_params)
         turn_id = result.get("turn", {}).get("id")
         if not isinstance(turn_id, str) or not turn_id or len(turn_id) > 200:
@@ -1741,6 +1925,7 @@ class NativeHost:
         # permanent history rows. Uncertain starts are recovered from canonical
         # Codex history, without replaying the question or inventing acceptance.
         self.active_turn = turn_id
+        self._source_accepted(request, thread_id, turn_id)
         self.pending_history = {"thread": thread_id, "key": turn_id, "text": ""}
         self.store.record(request, thread_id, turn_id + ":user", "user",
                           request['question'], request.get('selection'), answer_quote=request.get('answerQuote'))
@@ -1790,6 +1975,8 @@ class NativeHost:
                         self.pending_history['text'] = '\n\n'.join(final_items.values())
             elif method == "turn/completed" and data.get("turn", {}).get("id") == turn_id:
                 turn = data["turn"]
+                with self.steer_lock:
+                    self._source_terminal(request, thread_id, turn_id, turn.get('status'))
                 if turn.get("status") == "failed":
                     error = turn.get("error") or {}
                     raise HostError(error.get("message", "Codex could not complete the answer."))
@@ -1860,11 +2047,13 @@ class NativeHost:
                       'collaborationMode': {'mode': 'default', 'settings': {'model': model, 'reasoning_effort': effort or None,
                                                                          'developer_instructions': instructions}}}
             context = {'inheritThreadSettings': False, 'useAppServerPermissionDefault': False, 'usePermissionSelection': False}
+            self._source_dispatched(request)
             result = ipc.start_turn(params, context=context)
             turn_id = result.get('turn', {}).get('id')
             if not isinstance(turn_id, str) or not turn_id or len(turn_id) > 200:
                 raise DesktopIPCError('Codex Desktop did not confirm the submitted turn.', outcome_unknown=True)
             self.active_thread, self.active_turn = thread_id, turn_id
+            self._source_accepted(request, thread_id, turn_id)
             self.pending_history = {'thread': thread_id, 'key': turn_id, 'text': ''}
             self.store.record(request, thread_id, turn_id + ':user', 'user', request['question'], request.get('selection'),
                               answer_quote=request.get('answerQuote'))
@@ -1943,6 +2132,9 @@ class NativeHost:
                     self.emit(request['id'], 'delta', text=answer[len(emitted):])
                     emitted = answer
                 status = observed.get('status')
+                if status in ('failed', 'completed', 'interrupted'):
+                    with self.steer_lock:
+                        self._source_terminal(request, thread_id, turn_id, status)
                 if status == 'failed':
                     raise HostError('Codex Desktop could not complete the answer. Check this conversation in Codex for details.')
                 if status in ('completed', 'interrupted'):
@@ -1951,6 +2143,7 @@ class NativeHost:
         except DesktopIPCError as error:
             if error.outcome_unknown:
                 raise HostError('Codex may already have received this question. It was not sent again. Check the synchronized conversation before retrying.') from error
+            self._source_rejected(request, confirmed=True)
             raise HostError('Could not connect to this conversation in Codex Desktop. ' + safe_error(error)) from error
         finally:
             with self.steer_lock:

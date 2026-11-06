@@ -1,11 +1,41 @@
 import { describe, expect, it } from 'vitest';
-import { API_BUDGET_LIMITS, DEFAULT_CODEX_SETTINGS, isCodexAnswerQuote, isCodexSelection, parseCodexEvent, validCodexRequest, validateCodexSettings } from '../src/codex/types';
+import { API_BUDGET_LIMITS, DEFAULT_CODEX_SETTINGS, codexCacheMode, isCodexAnswerQuote, isCodexSelection, parseCodexEvent, validCodexRequest, validateCodexSettings } from '../src/codex/types';
 
 const projectId = '0123456789abcdef01234567';
 const selection = { path: 'chapter/notes.tex', text: 'x=0', from: 12, to: 15, startLine: 2, endLine: 2, before: 'Assume ', after: '.' };
 const ask = () => ({ version: 1, id: 'request-1', op: 'ask', projectId, question: 'Why does this vanish?', selection: { ...selection }, settings: { ...DEFAULT_CODEX_SETTINGS }, files: [{ path: 'chapter/notes.tex', content: 'Assume x=0.' }] });
 
 describe('Codex messages crossing extension/native boundaries', () => {
+  it('defaults new project source to on-demand while preserving legacy settings and selection scope',()=>{
+    expect(codexCacheMode(DEFAULT_CODEX_SETTINGS)).toBe('on-demand');
+    expect(validateCodexSettings(DEFAULT_CODEX_SETTINGS)).not.toHaveProperty('cacheMode');
+    const legacy={...DEFAULT_CODEX_SETTINGS,contextMode:'selection' as const};
+    expect(codexCacheMode(validateCodexSettings(legacy))).toBe('normal');
+    expect(validateCodexSettings(legacy)).toEqual(legacy);
+    for(const cacheMode of ['normal','on-demand','persistent'] as const){
+      const settings={...DEFAULT_CODEX_SETTINGS,cacheMode,contextMode:cacheMode==='normal'?'selection' as const:'project' as const};
+      expect(validateCodexSettings(settings)).toEqual(settings);expect(validCodexRequest({...ask(),settings})).toBe(true);
+    }
+    expect(validCodexRequest({...ask(),settings:{...DEFAULT_CODEX_SETTINGS,cacheMode:'normal'}})).toBe(false);
+  });
+  it('validates retention policy with its lease and keeps lifecycle operations background-only',()=>{
+    const base={version:1,id:'source',projectId};const snapshotId='ab'.repeat(32),leaseToken='12345678-1234-4234-8234-123456789abc';
+    const begin={...base,op:'source-begin',sourceManifest:[{path:'main.tex',bytes:1,sha256:snapshotId}],rootPath:'main.tex'};
+    for(const cacheMode of ['on-demand','persistent'])expect(validCodexRequest({...begin,cacheMode,leaseToken})).toBe(true);
+    for(const change of [{cacheMode:'normal',leaseToken},{cacheMode:'on-demand'},{leaseToken},{cacheMode:'persistent',leaseToken:'bad'}])expect(validCodexRequest({...begin,...change})).toBe(false);
+    for(const op of ['source-page-acquire','source-page-release','source-page-reconcile','source-queue-pin','source-queue-release','source-cache-sweep'])expect(validCodexRequest({...base,op})).toBe(false);
+    for(const op of ['source-cache-info','source-cache-open']){
+      expect(validCodexRequest({...base,op})).toBe(true);expect(validCodexRequest({...base,op,cacheRevision:snapshotId})).toBe(false);
+    }
+    expect(validCodexRequest({...base,op:'source-cache-clear',cacheRevision:snapshotId})).toBe(true);
+    expect(validCodexRequest({...base,op:'source-cache-clear'})).toBe(false);
+  });
+  it('accepts bounded cache receipts with Unix-second timestamps and rejects malformed counts/revisions',()=>{
+    const cacheInfo={folder:'C:\\Synthetic\\managed-source',snapshotCount:2,totalBytes:400,lastSyncedAt:1800000000.5,temporaryCount:1,persistentCount:1,legacyCount:0,pageCount:2,pinCount:1,cleanupPending:true,cacheRevision:'ab'.repeat(32)};
+    expect(parseCodexEvent({id:'r',type:'source',cacheInfo})?.cacheInfo).toEqual(cacheInfo);
+    for(const change of [{cacheRevision:'bad'},{folder:4},{snapshotCount:.5},{totalBytes:-1},{lastSyncedAt:NaN},{pinCount:Infinity},{cleanupPending:'yes'}])expect(parseCodexEvent({id:'r',type:'source',cacheInfo:{...cacheInfo,...change}})).toBeUndefined();
+    expect(parseCodexEvent({id:'r',type:'history',cacheInfo})).toBeUndefined();
+  });
   it('preserves optional API reading limits without changing old project settings', () => {
     const providerId = '12345678-1234-4234-8234-123456789abc';
     const legacy = { ...DEFAULT_CODEX_SETTINGS, providerId };

@@ -7,6 +7,7 @@ import { API_BUDGET_LIMITS, type APIProfile } from '../codex/types';
 import type { CodexBusyMessageBehavior } from '../codex/storage';
 
 export interface CodexPanelSettings {
+  cacheMode?: 'normal' | 'on-demand' | 'persistent';
   providerId?: string;
   apiModel?: string;
   apiMaxReadRounds?: number;
@@ -52,6 +53,9 @@ export interface PanelActions {
   defaultsCodex?(): Promise<void>;
   checkCodex?(): Promise<void>;
   onSyncProjectCache?(): Promise<string>;
+  inspectProjectCache?(): Promise<string>;
+  clearProjectCache?(): Promise<string>;
+  openProjectCache?(): Promise<string>;
   manageCodexProviders?(): Promise<void>;
   refreshCodexProviders?(): Promise<void>;
   openCodex?(): Promise<void>;
@@ -868,9 +872,11 @@ export function mountNativeSettings(getModel: () => PanelModel, actions: PanelAc
     apiDetails.after(modelRow,apiModelRow,effortRow);
 
     const scope=element('select','ide-dropdown-setting form-select form-select-sm');scope.id='opt-codex-context';
-    scope.append(new Option(t('codexContextProject'),'project'),new Option(t('codexContextSelection'),'selection'));
-    scope.value=codexDraft.contextMode;scope.onchange=()=>{codexDraft!.contextMode=scope.value as CodexPanelSettings['contextMode'];scheduleCodexSave();};
+    scope.append(new Option(t('codexContextNormal'),'selection'),new Option(t('codexContextOnDemand'),'project'),new Option(t('codexContextPersistent'),'persistent'));
+    scope.value=codexDraft.contextMode==='selection'?'selection':codexDraft.cacheMode==='persistent'?'persistent':'project';
+    scope.onchange=()=>{codexDraft!.contextMode=scope.value==='selection'?'selection':'project';codexDraft!.cacheMode=scope.value==='selection'?'normal':scope.value==='persistent'?'persistent':'on-demand';scheduleCodexSave();};
     section.append(row(t('codexContext'),t('codexContextDescription'),scope));
+    const retention=element('p','opt-note',t('codexCacheRetention'));section.append(retention);
 
     const budget=element('div','opt-api-budget');budget.id='opt-codex-api-budget';
     budget.setAttribute('role','group');budget.setAttribute('aria-labelledby','opt-codex-api-budget-title');
@@ -936,6 +942,15 @@ export function mountNativeSettings(getModel: () => PanelModel, actions: PanelAc
       }),
     );
     section.append(buttons,element('p','opt-note',t('codexDefaultsDescription')),setupNote);
+    if(actions.inspectProjectCache){
+      const cacheDetails=element('div','opt-actions');
+      const cacheInfo=element('p','opt-note');cacheInfo.setAttribute('role','status');cacheInfo.style.whiteSpace='pre-wrap';
+      const clearConfirm=actionButton(t('codexCacheClearConfirm'),'codex-cache-confirm',async()=>{cacheInfo.textContent=await actions.clearProjectCache!();clearConfirm.hidden=true;});clearConfirm.hidden=true;clearConfirm.classList.replace('btn-secondary','btn-danger');
+      cacheDetails.append(actionButton(t('codexCacheInspect'),'codex-cache-inspect',async()=>{clearConfirm.hidden=true;cacheInfo.textContent=await actions.inspectProjectCache!();}));
+      if(actions.clearProjectCache)cacheDetails.append(actionButton(t('codexCacheClear'),'codex-cache-clear',async()=>{clearConfirm.hidden=true;cacheInfo.textContent=await actions.inspectProjectCache!()+'\n\n'+t('codexCacheClearWarning');clearConfirm.hidden=false;}),clearConfirm);
+      if(actions.openProjectCache)cacheDetails.append(actionButton(t('codexCacheOpen'),'codex-cache-open',async()=>{clearConfirm.hidden=true;cacheInfo.textContent=await actions.openProjectCache!();}));
+      section.append(cacheDetails,cacheInfo);
+    }
     statusNode=element('div','opt-status');statusNode.id='opt-codex-status';statusNode.setAttribute('role','status');section.append(statusNode);
     panel.append(section);update();
   }

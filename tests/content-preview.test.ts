@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fileURLToPath } from 'node:url';
 import { DEFAULT_SETTINGS, emptyIndex, type ProjectIndex, type Settings } from '../src/core/types';
 import type { PanelActions, PanelModel } from '../src/settings/native-panel';
 import type { TexPreviewInput } from '../src/preview/tex-service';
@@ -54,7 +55,7 @@ beforeEach(async()=>{
   mocks.renderTex.mockReset().mockImplementation(async(input:TexPreviewInput)=>({pdf:new TextEncoder().encode(input.formula),diagnostics:[]}));
   mocks.renderFormula.mockReset().mockImplementation(async(tex:string)=>({svg:`<svg xmlns="http://www.w3.org/2000/svg"><text>${tex}</text></svg>`,diagnostics:[]}));
   mocks.renderPdf.mockReset().mockImplementation(async(pdf:Uint8Array)=>({dataUrl:'data:image/png;base64,'+btoa(new TextDecoder().decode(pdf)),width:50,height:20,diagnostics:[]}));
-  vi.stubGlobal('chrome',{runtime:{id:'synthetic-extension',getURL:(name:string)=>name==='renderer.js'?new URL('../src/preview/render.ts',import.meta.url).pathname:new URL('../src/preview/cloud-pdf.ts',import.meta.url).pathname},storage:{local:{get:async()=>({}),set:async()=>{}}}});
+  vi.stubGlobal('chrome',{runtime:{id:'synthetic-extension',getURL:(name:string)=>fileURLToPath(new URL(name==='renderer.js'?'../src/preview/render.ts':'../src/preview/cloud-pdf.ts',import.meta.url)).replaceAll('\\','/')},storage:{local:{get:async()=>({}),set:async()=>{}}}});
   vi.stubGlobal('requestAnimationFrame',(callback:FrameRequestCallback)=>setTimeout(()=>callback(performance.now()),16));
   vi.stubGlobal('cancelAnimationFrame',(id:number)=>clearTimeout(id));
   events=[];observers=[];
