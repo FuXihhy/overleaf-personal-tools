@@ -1,0 +1,31 @@
+{
+  "name": "overleaf-personal-tools",
+  "version": "0.12.14",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "node scripts/check.mjs"
+  },
+  "devDependencies": {
+    "@codemirror/autocomplete": "^6.20.4",
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.15",
+    "@types/chrome": "^0.1.0",
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.25.0",
+    "jsdom": "^26.1.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
+  },
+  "dependencies": {
+    "fflate": "0.8.2",
+    "mathjax-full": "3.2.2",
+    "pdfjs-dist": "6.4.299",
+    "socket.io-client": "https://github.com/overleaf/socket.io-client/archive/refs/tags/0.9.17-overleaf-6.tar.gz"
+  }
+}

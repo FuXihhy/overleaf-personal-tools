@@ -1,0 +1,47 @@
+*{box-sizing:border-box}body{margin:0;font:14px/1.5 "Noto Sans",system-ui,sans-serif;color:#253442;background:#f5f6f7}button,select,input,textarea{font:inherit}[hidden]{display:none!important}button{cursor:pointer}body>header{height:58px;background:#203b33;color:#fff;display:flex;align-items:center;gap:22px;padding:0 22px}body>header span{opacity:.7;font-size:12px}body>header button{margin-left:auto}main.ide-redesign-inner{display:flex;height:calc(100vh - 58px);min-width:0;overflow:hidden}.ide-rail{width:56px;flex:0 0 56px;background:#202a35;color:#f1f3f5;border-right:1px solid #354252;padding:10px 6px}.ide-rail-tabs-wrapper{display:flex;flex-direction:column;gap:8px}.ide-rail-tab-link{width:44px;height:44px;display:flex;align-items:center;justify-content:center;border:0;border-radius:8px;background:transparent;color:inherit;padding:10px}.ide-rail-tab-link:hover{background:#ffffff10}.ide-rail-tab-link.open-rail{background:#24613d}.ide-rail-tab-link svg{width:25px;height:25px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}.ide-rail-content{width:200px;flex:0 0 200px;overflow:auto}aside{background:#ecf0ee;border-right:1px solid #ccd6d0;padding:16px 10px}aside h2{font-size:14px;margin:0 10px 12px}aside button{display:block;border:0;background:none;padding:8px;width:100%;text-align:left;font-size:12px;overflow-wrap:anywhere}aside button[aria-selected=true]{background:#d3e5db;border-radius:4px}.editor-column{min-width:240px;flex:1 1 55%;background:white;overflow:hidden}.editor-heading{height:40px;border-bottom:1px solid #ddd;background:#f8f8f8;display:flex;justify-content:space-between;padding:9px 16px;font-size:12px}.cm-editor{height:500px}.cm-scroller{font-family:ui-monospace,monospace;font-size:14px}.hint{padding:12px 20px;font-size:12px;color:#667}.pdf-column{min-width:240px;flex:1 1 45%;overflow:auto;background:#d9dddd;border-left:1px solid #ccc}.paper{background:white;margin:24px;padding:32px;min-height:460px;box-shadow:0 1px 5px #0002}.paper h1{font-size:22px}#fixture-state{font-size:12px;white-space:pre-wrap}.backdrop{position:fixed;inset:0;background:#0005;display:flex;align-items:center;justify-content:center;z-index:100}.modal{width:min(920px,94vw);height:min(650px,90vh);background:#fff;border-radius:8px;box-shadow:0 12px 60px #0004;display:flex;flex-direction:column}/* Match the native Settings geometry so extension styles are tested honestly. */
+.modal-header{padding:16px 24px;border-bottom:1px solid #ddd;display:flex;justify-content:space-between;align-items:center;font-size:16px;line-height:24px;font-weight:400}
+.modal-header button{border:0;background:transparent;font-size:20px;line-height:24px}
+.ide-settings-modal-body{font-size:16px;line-height:24px;display:grid;grid-template-columns:210px 1fr;flex:1;min-height:0}
+.ide-settings-tab-nav{display:flex;flex-direction:column;background:#f6f7f7;padding:16px 10px;gap:3px}
+.ide-settings-tab-link{border:0;padding:8px 12px;background:transparent;text-align:left;border-radius:4px;color:#344;text-decoration:none;display:flex;gap:4px;align-items:center;font-size:14px;line-height:20px;font-weight:400}
+.ide-settings-tab-link[aria-selected=true]{background:#e8f2ea;color:#174d36;font-weight:700}
+.ide-settings-tab-link:hover{background:#e8edeb}
+.ide-settings-tab-link-icon{width:20px;height:20px;flex:none}
+.ide-settings-tab-content{padding:24px;overflow:auto}
+.ide-settings-tab-content [hidden]{display:none!important}
+.ide-settings-section{display:flex;flex-direction:column;gap:16px}
+.ide-settings-section-title{font-size:16px;line-height:24px;font-weight:600;margin:0}
+.ide-setting{display:flex;align-items:center;gap:16px;padding:0 4px}
+.ide-setting>div:first-child{flex:1;min-width:0}
+.ide-setting-title{display:block;font-size:14px;line-height:21px;font-weight:400;margin:0}
+.ide-setting-description{font-size:14px;line-height:21px;font-weight:400;color:#697779;margin:0}
+.ide-setting-input{display:flex;align-items:center;width:160px;flex:none}
+.form-select,.form-control{font-size:16px;line-height:24px;font-weight:400;border:1px solid #b5bfc0;border-radius:4px;background-color:#fff;color:#253442}
+.form-select{appearance:none;padding:2px 24px 2px 6px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='m3 4.5 3 3 3-3' fill='none' stroke='%23555' stroke-width='1.5'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 6px center;background-size:12px}
+.ide-dropdown-setting{width:120px;max-width:100%}
+.form-control{width:100%;padding:2px 6px}
+.form-select:focus,.form-control:focus{outline:0;border-color:#257451;box-shadow:0 0 0 2px #25745125}
+.form-check-input{accent-color:#257451}
+.form-switch{padding-left:2.5em;min-height:21px;display:flex;align-items:center}
+.form-switch .form-check-input{appearance:none;width:28px;height:16px;margin:0 0 0 -2.5em;border:1px solid #aeb8b3;border-radius:20px;background-color:#fff;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12'%3E%3Ccircle cx='6' cy='6' r='5' fill='%23818a85'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:left 1px center;background-size:12px;cursor:pointer;flex:none}
+.form-switch .form-check-input:checked{background-color:#257451;border-color:#257451;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12'%3E%3Ccircle cx='6' cy='6' r='5' fill='white'/%3E%3C/svg%3E");background-position:right 1px center}
+.form-switch .form-check-input:focus-visible{outline:2px solid #25745155;outline-offset:2px}
+/* Native Overleaf .btn-sm tokens verified on the live Settings dialog. */
+.btn{--bs-btn-border-radius:9999px;padding:2px 12px;font-family:"Noto Sans",sans-serif;font-size:14px;line-height:20px;font-weight:600;border:1px solid #677283;border-radius:var(--bs-btn-border-radius);background:#fff;color:#1b222c;box-shadow:none}
+.btn:hover:not(:disabled){background:#e7e9ee}
+.btn-primary{background:#098842;color:#fff;border-width:0;border-color:#098842}
+.btn-primary:hover:not(:disabled){background:#1e6b41}
+.btn:disabled{background:#e7e9ee;border-color:#e7e9ee;color:#afb5c0;cursor:default}
+.btn:focus-visible{outline:0;box-shadow:0 0 0 2px #97b6e5}
+.ol-cm-math-tooltip-container{position:fixed;bottom:64px;left:250px;z-index:20}.ol-cm-math-tooltip{display:flex;align-items:center;gap:16px;background:#fff;border:1px solid #bfcac3;padding:14px 18px;border-radius:6px;box-shadow:0 4px 14px #0002;max-width:70vw}.ol-cm-math-tooltip .dropdown button{border:0;background:transparent;font-size:18px}.cm-tooltip-autocomplete{z-index:30}.cm-tooltip-autocomplete ul{max-height:200px}.cm-completionDetail{opacity:.65;font-size:11px}
+
+@media(max-width:1000px){body>header{gap:12px;padding:0 12px}body>header span{display:none}.paper{margin:12px;padding:20px}.ide-rail-content{width:150px;flex-basis:150px}}
+
+/* Keep the parent deliberately larger, matching Overleaf: generic inheritance
+   must not override the compact native control classes. */
+.form-select-sm,.form-control-sm{font-size:14px;line-height:21px}
+#fixture-codex-controls{font-size:12px;line-height:18px;border-top:1px solid #ddd;margin-top:18px;padding-top:12px}
+#fixture-codex-controls p{margin:8px 0;overflow-wrap:anywhere}
+#fixture-codex-controls button{font-size:12px;padding:4px 8px}
+html[data-theme=dark] .ide-rail,html[data-theme=dark] .ide-rail-content{background:#1b222c;color:#f4f5f6;border-color:#354252}
+html[data-theme=dark] aside button[aria-selected=true]{background:#244b35}

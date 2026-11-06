@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="ol-projectName" content="Synthetic extension test project">
+  <meta name="ol-project_id" content="0123456789abcdef01234567">
+  <meta name="ol-user_id" content="aaaaaaaaaaaaaaaaaaaaaaaa">
+  <title>人工测试 · Overleaf Personal Tools</title>
+  <link rel="stylesheet" href="/dev/style.css">
+</head>
+<body>
+  <header><strong>人工测试 · Overleaf Personal Tools</strong><span>Synthetic project · simulated Codex replies · no personal documents</span><label for="fixture-language">UI language</label><select id="fixture-language"><option value="en">English</option><option value="zh-CN">中文</option></select><label for="fixture-theme">Rail theme</label><select id="fixture-theme"><option value="light">Light</option><option value="dark">Dark</option></select><button id="settings-open">Settings</button></header>
+  <main class="flex ide-redesign-inner">
+    <nav class="ide-rail" aria-label="Project tools">
+      <div class="ide-rail-tabs-wrapper" role="tablist" aria-label="Project panels">
+        <button id="ide-rail-tabs-tab-file-tree" class="ide-rail-tab-link nav-link open-rail" role="tab" aria-label="Files" aria-selected="true" aria-controls="fixture-native-rail-panel" title="Files"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l4 4v14H6zM14 3v5h4M9 12h6M9 16h6"/></svg></button>
+        <button id="ide-rail-tabs-tab-workbench" class="ide-rail-tab-link nav-link" role="tab" aria-label="AI assistant" aria-selected="false" aria-controls="fixture-native-rail-panel" title="AI assistant"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.4 6.6L21 12l-6.6 2.4L12 21l-2.4-6.6L3 12l6.6-2.4zM20 2v4M18 4h4"/></svg></button>
+      </div>
+    </nav>
+    <aside id="fixture-native-rail-panel" class="ide-rail-content" role="tabpanel" aria-label="Project files"><div id="fixture-files-panel"><h2>Files</h2><div id="file-tree" role="tree"></div></div><div id="fixture-ai-panel" hidden><h2>AI assistant</h2><p>人工测试：此面板只模拟原生布局，不连接 Overleaf AI。</p></div></aside>
+    <section class="editor-column"><div class="editor-heading"><span>Code Editor</span><span id="current-file">main.tex</span></div><div id="editor"></div><p class="hint">Click inside a formula to open the extension preview. Type a backslash and press Ctrl+Space to view completions.</p></section>
+    <section class="pdf-column"><div class="editor-heading">PDF preview area</div><div class="paper"><h1>Integration fixture</h1><p>This pane is intentionally static. The tested extension uses the existing editor, completion list, settings dialog, and an independently anchored formula popup.</p><p id="fixture-state" role="status">Starting editor…</p><section id="fixture-codex-controls" aria-label="Synthetic Codex controls">
+      <p>人工测试 · Codex QA controls. Every reply below is simulated.</p>
+      <button id="fixture-codex-long" type="button">Run simulated long reply</button>
+      <p id="fixture-codex-model-status" role="status">Model catalogue has not been requested.</p>
+      <p id="fixture-codex-stream-status" role="status">No simulated answer is running.</p>
+      <p>人工测试 · Desktop history updates. Open with <code>?codex-history=1</code> for a saved conversation. Keep a draft and scroll upward before using these controls; the extension must discover the change through its normal polling.</p>
+      <button id="fixture-codex-desktop-append" type="button">Append simulated desktop turn</button>
+      <button id="fixture-codex-desktop-start" type="button">Desktop: start simulated reply</button>
+      <button id="fixture-codex-desktop-finish" type="button">Desktop: finish simulated reply</button>
+      <button id="fixture-codex-release-page" type="button">Release simulated other page</button>
+      <p id="fixture-codex-sync-status" role="status">Synthetic desktop history not initialized.</p>
+      <p id="fixture-codex-copy-status" data-enabled="false" role="status">人工测试 · Saved click-to-copy preference: off (default). Toggle it in Settings → Extension → Codex Assistant.</p>
+    </section></div></section>
+  </main>
+  <div id="dialog-host"></div>
+  <script type="module" src="/dev/harness.js"></script>
+</body>
+</html>
