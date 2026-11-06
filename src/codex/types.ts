@@ -1,5 +1,7 @@
 export interface APIProfile { id: string; name: string; baseUrl: string; model: string; hasKey: boolean }
 export interface CodexSettings {
+  /** Unset legacy project settings use on-demand for new snapshots only. */
+  cacheMode?: 'normal' | 'on-demand' | 'persistent';
   providerId?: string;
   apiModel?: string;
   apiMaxReadRounds?: number;
@@ -26,6 +28,7 @@ export interface CodexMessage { role: 'user' | 'assistant'; text: string; select
 export interface CodexModel { id: string; displayName: string; efforts?: string[] }
 export interface CodexConversation { id: string; title: string; updatedAt: number; createdAt?: number; current?: boolean; messageCount?: number }
 export interface CodexSourceManifestEntry { path: string; bytes: number; sha256: string }
+export interface CodexCacheInfo { folder: string | null; snapshotCount: number; totalBytes: number; lastSyncedAt: number; temporaryCount: number; persistentCount: number; legacyCount: number; pageCount: number; pinCount: number; cleanupPending: boolean; cacheRevision: string }
 export const CODEX_SOURCE_MAX_FILES = 2000;
 export const CODEX_SOURCE_MAX_FILE_BYTES = 2 * 1024 * 1024;
 export const CODEX_SOURCE_MAX_TOTAL_BYTES = 16 * 1024 * 1024;
@@ -33,7 +36,7 @@ export const CODEX_SOURCE_CHUNK_CHARS = 100_000;
 export interface CodexRequest {
   version: 1;
   id: string;
-  op: 'provider-list' | 'status' | 'ask' | 'steer' | 'cancel' | 'new-chat' | 'history-list' | 'history-read' | 'history-select' | 'source-begin' | 'source-chunk' | 'source-commit' | 'source-check';
+  op: 'provider-list' | 'status' | 'ask' | 'steer' | 'cancel' | 'new-chat' | 'history-list' | 'history-read' | 'history-select' | 'source-begin' | 'source-chunk' | 'source-commit' | 'source-check' | 'source-cache-info' | 'source-cache-clear' | 'source-cache-open';
   projectId: string;
   accountId?: string;
   providerId?: string;
@@ -55,6 +58,9 @@ export interface CodexRequest {
   path?: string;
   offset?: number;
   content?: string;
+  cacheMode?: 'on-demand' | 'persistent';
+  leaseToken?: string;
+  cacheRevision?: string;
 }
 export interface CodexEvent {
   id: string;
@@ -71,6 +77,9 @@ export interface CodexEvent {
   errorCode?: string;
   retryable?: boolean;
   diagnostic?: string;
+  connectionKind?: 'standalone';
+  projectReaderReady?: boolean;
+  readerError?: string;
   models?: CodexModel[];
   profiles?: APIProfile[];
   conversations?: CodexConversation[];
@@ -87,8 +96,12 @@ export interface CodexEvent {
   missingPaths?: string[];
   fileCount?: number;
   totalBytes?: number;
+  cacheInfo?: CodexCacheInfo;
 }
 export const DEFAULT_CODEX_SETTINGS: CodexSettings = { enabled: true, model: '', effort: '', instructions: '', contextMode: 'project' };
+export function codexCacheMode(settings?: Pick<CodexSettings, 'contextMode' | 'cacheMode'>): 'normal' | 'on-demand' | 'persistent' {
+  return settings?.contextMode === 'selection' ? 'normal' : settings?.cacheMode === 'persistent' ? 'persistent' : 'on-demand';
+}
 export const API_BUDGET_LIMITS = {
   apiMaxReadRounds: { min: 1, max: 256, default: 64 },
   apiMaxToolCalls: { min: 1, max: 512, default: 128 },
@@ -115,6 +128,7 @@ export function validateCodexSettings(value: unknown): CodexSettings {
     if (typeof value === 'number' && Number.isInteger(value) && value >= limits.min && value <= limits.max) budget[key] = value;
   }
   return {
+    ...(['normal','on-demand','persistent'].includes(String(s.cacheMode)) ? {cacheMode: (s.contextMode === 'selection' ? 'normal' : s.cacheMode === 'persistent' ? 'persistent' : 'on-demand') as CodexSettings['cacheMode']} : {}),
     ...(conversationId(s.providerId) ? { providerId: s.providerId } : {}),
     ...(conversationId(s.providerId) && typeof s.apiModel === 'string' && /^[A-Za-z0-9._:/@+\-]{1,128}$/.test(s.apiModel) ? { apiModel: s.apiModel } : {}),
     ...budget,
@@ -144,16 +158,20 @@ export function codexQuotationBytes(selection?: CodexSelection, answerQuote?: Co
 }
 export function validCodexRequest(value: unknown): value is CodexRequest {
   const r = record(value);
-  if (!r || Object.keys(r).some(key => !['version','id','op','projectId','accountId','question','selection','answerQuote','files','settings','conversationId','cursor','limit','expectedConversationId','expectedSyncRevision','expectedTurnId','providerId','snapshotId','sourceManifest','rootPath','uploadId','path','offset','content'].includes(key))
+  if (!r || Object.keys(r).some(key => !['version','id','op','projectId','accountId','question','selection','answerQuote','files','settings','conversationId','cursor','limit','expectedConversationId','expectedSyncRevision','expectedTurnId','providerId','snapshotId','sourceManifest','rootPath','uploadId','path','offset','content','cacheMode','leaseToken','cacheRevision'].includes(key))
     || r.version !== 1 || typeof r.id !== 'string' || !/^[\w-]{1,100}$/.test(r.id)
-    || !['provider-list','status','ask','steer','cancel','new-chat','history-list','history-read','history-select','source-begin','source-chunk','source-commit','source-check'].includes(String(r.op)) || typeof r.projectId !== 'string' || !/^[a-f\d]{24}$/i.test(r.projectId)
+    || !['provider-list','status','ask','steer','cancel','new-chat','history-list','history-read','history-select','source-begin','source-chunk','source-commit','source-check','source-cache-info','source-cache-clear','source-cache-open'].includes(String(r.op)) || typeof r.projectId !== 'string' || !/^[a-f\d]{24}$/i.test(r.projectId)
     || r.accountId !== undefined && (typeof r.accountId !== 'string' || !/^[a-f\d]{24}$/i.test(r.accountId))) return false;
   if (r.providerId !== undefined && !conversationId(r.providerId)) return false;
   if (String(r.op).startsWith('source-')) {
     const envelope = ['version','id','op','projectId','accountId'];
+    if (r.op === 'source-cache-info' || r.op === 'source-cache-open') return Object.keys(r).every(key => envelope.includes(key));
+    if (r.op === 'source-cache-clear') return Object.keys(r).every(key => [...envelope,'cacheRevision'].includes(key)) && isCodexSnapshotId(r.cacheRevision);
     if (r.op === 'source-check') return Object.keys(r).every(key => [...envelope,'snapshotId'].includes(key)) && isCodexSnapshotId(r.snapshotId);
     if (r.op === 'source-begin') {
-      if (Object.keys(r).some(key => ![...envelope,'sourceManifest','rootPath'].includes(key)) || !sourcePath(r.rootPath, true)
+      if (Object.keys(r).some(key => ![...envelope,'sourceManifest','rootPath','cacheMode','leaseToken'].includes(key)) || !sourcePath(r.rootPath, true)
+        || r.cacheMode !== undefined && (!['on-demand','persistent'].includes(String(r.cacheMode)) || !conversationId(r.leaseToken))
+        || r.leaseToken !== undefined && (r.cacheMode === undefined || !conversationId(r.leaseToken))
         || !Array.isArray(r.sourceManifest) || !r.sourceManifest.length || r.sourceManifest.length > CODEX_SOURCE_MAX_FILES) return false;
       let total = 0; const paths = new Set<string>();
       for (const value of r.sourceManifest) {
@@ -182,7 +200,7 @@ export function validCodexRequest(value: unknown): value is CodexRequest {
     return true;
   }
   if (r.op !== 'ask' && r.op !== 'steer') return Object.keys(r).every(key => ['version','id','op','projectId','accountId','providerId'].includes(key));
-  if (['sourceManifest','rootPath','uploadId','path','offset','content'].some(key => r[key] !== undefined)) return false;
+  if (['sourceManifest','rootPath','uploadId','path','offset','content','cacheMode','leaseToken','cacheRevision'].some(key => r[key] !== undefined)) return false;
   if (r.snapshotId !== undefined && (!isCodexSnapshotId(r.snapshotId) || record(r.settings)?.contextMode === 'selection' || Array.isArray(r.files) && r.files.length > 0)) return false;
   if (r.conversationId !== undefined || r.cursor !== undefined || r.limit !== undefined) return false;
   if (r.op === 'steer' && (r.providerId !== undefined || !conversationId(r.expectedConversationId) || typeof r.expectedTurnId !== 'string' || !/^[\w.:-]{1,300}$/.test(r.expectedTurnId))) return false;
@@ -218,6 +236,19 @@ export function parseCodexEvent(value: unknown): CodexEvent | undefined {
   const r = record(value);
   if (!r || typeof r.id !== 'string' || !/^[\w-]{1,100}$/.test(r.id) || !['profiles','status','started','steered','delta','done','error','history','source'].includes(String(r.type))) return;
   const event: CodexEvent = { id: r.id, type: r.type as CodexEvent['type'] };
+  if(r.connectionKind!==undefined){if(r.type!=='status'||r.connectionKind!=='standalone')return;event.connectionKind='standalone';}
+  if(r.projectReaderReady!==undefined){if(r.type!=='status'||typeof r.projectReaderReady!=='boolean')return;event.projectReaderReady=r.projectReaderReady;}
+  if(r.readerError!==undefined){if(r.type!=='status'||typeof r.readerError!=='string'||r.readerError.length>4000)return;event.readerError=r.readerError;}
+  if (r.cacheInfo !== undefined) {
+    const c = record(r.cacheInfo);
+    if (r.type !== 'source' || !c || !(c.folder === null || typeof c.folder === 'string' && c.folder.length <= 4096)
+      || !isCodexSnapshotId(c.cacheRevision) || typeof c.cleanupPending !== 'boolean') return;
+    for (const key of ['snapshotCount','totalBytes','lastSyncedAt','temporaryCount','persistentCount','legacyCount','pageCount','pinCount']) {
+      if (typeof c[key] !== 'number' || !Number.isFinite(c[key]) || Number(c[key]) < 0) return;
+      if (key !== 'lastSyncedAt' && !Number.isSafeInteger(c[key])) return;
+    }
+    event.cacheInfo = c as unknown as CodexCacheInfo;
+  }
   if (r.uploadId !== undefined) { if (r.type !== 'source' || !conversationId(r.uploadId)) return; event.uploadId = r.uploadId; }
   if (r.snapshotId !== undefined) { if (r.type !== 'source' || !isCodexSnapshotId(r.snapshotId)) return; event.snapshotId = r.snapshotId; }
   if (r.missingPaths !== undefined) {

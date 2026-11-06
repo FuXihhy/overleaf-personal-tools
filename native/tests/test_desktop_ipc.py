@@ -6,6 +6,7 @@ from pathlib import Path
 import queue
 import socket
 import struct
+import sys
 import tempfile
 import threading
 import time
@@ -13,6 +14,7 @@ import unittest
 from unittest import mock
 
 
+sys.path.insert(0, str(Path(__file__).parents[1]))
 spec = importlib.util.spec_from_file_location('desktop_ipc_tested', Path(__file__).parents[1] / 'desktop_ipc.py')
 ipc = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ipc)
@@ -26,8 +28,10 @@ NONCE = '01a18cbd-8295-7070-8093-1902e8a20550'
 class FakeRouter:
     def __init__(self, path):
         self.path = path
-        self.server = socket.socket(socket.AF_UNIX)
-        self.server.bind(str(path)); os.chmod(path, 0o600); self.server.listen(1)
+        self.server = socket.socket(socket.AF_INET if os.name == 'nt' else socket.AF_UNIX)
+        self.server.bind(('127.0.0.1', 0) if os.name == 'nt' else str(path))
+        if os.name != 'nt': os.chmod(path, 0o600)
+        self.server.listen(1)
         self.peer = None; self.received = []; self.handler = None; self.write_lock = threading.Lock()
         self.worker = threading.Thread(target=self.run, daemon=True); self.worker.start()
     def send(self, value):
@@ -75,9 +79,25 @@ class DesktopIPCTests(unittest.TestCase):
         self.budget_patch = mock.patch.object(ipc, 'ROUTER_DISCOVERY_TIMEOUT', 0.05); self.budget_patch.start()
         self.temp = tempfile.TemporaryDirectory(); self.path = Path(self.temp.name) / 'ipc.sock'
         os.chmod(self.temp.name, 0o700); self.router = FakeRouter(self.path); self.client = None
+        self.pipe_patch = None
+        if os.name == 'nt':
+            def connect_pipe(path, timeout=5):
+                sock = socket.create_connection(self.router.server.getsockname(), timeout)
+                try:
+                    ipc._check_peer(sock)
+                except Exception:
+                    sock.close(); raise
+                sock.settimeout(None)
+                class Transport:
+                    peer = {'created_at': 1.0}
+                    def __getattr__(self, name): return getattr(sock, name)
+                return Transport()
+            self.pipe_patch = mock.patch.object(ipc, 'NamedPipeSocket', side_effect=connect_pipe)
+            self.pipe_patch.start()
     def tearDown(self):
         if self.client: self.client.close()
         self.router.close(); self.temp.cleanup(); self.budget_patch.stop()
+        if self.pipe_patch: self.pipe_patch.stop()
     def connect(self):
         self.client = ipc.DesktopIPC(self.path, timeout=1)
         self.client.discover_owner(THREAD)
@@ -113,6 +133,14 @@ class DesktopIPCTests(unittest.TestCase):
         self.assertFalse(any(x.get('method') == 'thread-follower-start-turn' for x in self.router.received))
 
     def test_private_socket_and_directory_permissions_are_not_relaxed(self):
+        if os.name == 'nt':
+            # Windows has no Unix socket permission bits. The production pipe
+            # adapter rejects custom/remote endpoints before opening a handle;
+            # actual token/package validation is covered by test_windows_desktop.
+            from windows_desktop import NamedPipeSocket, WindowsDesktopError
+            for endpoint in (str(self.path), r'\\other-host\pipe\codex-ipc', r'\\.\pipe\other'):
+                with self.assertRaises(WindowsDesktopError): NamedPipeSocket(endpoint)
+            return
         os.chmod(self.path, 0o666)
         with self.assertRaises(ipc.DesktopIPCError): ipc.DesktopIPC(self.path)
         self.assertEqual(os.stat(self.path).st_mode & 0o777, 0o666)

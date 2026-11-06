@@ -62,6 +62,35 @@ describe('native settings integration', () => {
     expect(document.querySelector('#opt-settings-panel')).toBeNull();
   });
 
+  it('shows the three retention modes, defaults to on-demand, and persists explicit local retention',async()=>{
+    document.documentElement.lang='en';model.codex={enabled:true,model:'',effort:'',instructions:'',contextMode:'project'};
+    actions.saveCodex=vi.fn(async next=>{model.codex={...next};});nativeDialog();await flush();openCodex();
+    const select=document.getElementById('opt-codex-context') as HTMLSelectElement;
+    expect(select.options).toHaveLength(3);expect(select.value).toBe('project');
+    expect(select.options[0].text).toContain('Normal context');expect(select.options[1].text).toContain('default');expect(select.options[2].text).toContain('Keep');
+    select.value='persistent';select.dispatchEvent(new Event('change'));await flush();
+    expect(actions.saveCodex).toHaveBeenLastCalledWith(expect.objectContaining({contextMode:'project',cacheMode:'persistent'}));
+    select.value='selection';select.dispatchEvent(new Event('change'));await flush();
+    expect(actions.saveCodex).toHaveBeenLastCalledWith(expect.objectContaining({contextMode:'selection',cacheMode:'normal'}));
+  });
+
+  it('shows exact local-copy information and a separate confirmation before cleanup, preserving failures for review',async()=>{
+    document.documentElement.lang='en';model.codex={enabled:true,model:'',effort:'',instructions:'',contextMode:'project',cacheMode:'persistent'};
+    actions.inspectProjectCache=vi.fn(async()=>'2 retained versions; 400 bytes; C:\\Synthetic\\mirror');
+    actions.clearProjectCache=vi.fn(async()=>'0 versions');actions.openProjectCache=vi.fn(async()=>'Folder opened');
+    nativeDialog();await flush();openCodex();
+    const button=(name:string)=>document.querySelector<HTMLButtonElement>(`[data-opt-action="codex-cache-${name}"]`)!;
+    expect(button('confirm').hidden).toBe(true);button('clear').click();await flush();
+    expect(actions.inspectProjectCache).toHaveBeenCalledOnce();expect(actions.clearProjectCache).not.toHaveBeenCalled();
+    expect(document.getElementById('opt-settings-panel')!.textContent).toContain('2 retained versions; 400 bytes');expect(document.getElementById('opt-settings-panel')!.textContent).toContain('Chat history');
+    expect(button('confirm').hidden).toBe(false);
+    vi.mocked(actions.clearProjectCache).mockRejectedValueOnce(new Error('Cache changed; inspect again'));
+    button('confirm').click();await flush();expect(document.getElementById('opt-codex-status')!.textContent).toContain('Cache changed');
+    button('inspect').click();await flush();expect(button('confirm').hidden).toBe(true);
+    button('clear').click();await flush();button('confirm').click();await flush();
+    expect(button('confirm').hidden).toBe(true);expect(document.getElementById('opt-settings-panel')!.textContent).toContain('0 versions');
+  });
+
   it('remounts Extension after the entire body and head are replaced', async () => {
     nativeDialog();await flush();expect(document.getElementById('opt-settings-tab')).not.toBeNull();
     const oldHead=document.head,oldBody=document.body;
@@ -794,7 +823,7 @@ describe('native settings integration', () => {
     scope.value='selection';scope.dispatchEvent(new Event('change'));
     instructions.value='保留符号约定';instructions.dispatchEvent(new Event('input'));
     instructions.dispatchEvent(new Event('blur'));await flush();
-    expect(actions.saveCodex).toHaveBeenLastCalledWith({enabled:false,model:'model-one',effort:'high',contextMode:'selection',instructions:'保留符号约定'});
+    expect(actions.saveCodex).toHaveBeenLastCalledWith({enabled:false,model:'model-one',effort:'high',contextMode:'selection',cacheMode:'normal',instructions:'保留符号约定'});
     expect(actions.save).not.toHaveBeenCalled();expect(actions.defaults).not.toHaveBeenCalled();
     expect(model.codex.enabled).toBe(false);
     expect(document.getElementById('opt-settings-panel')?.textContent).not.toMatch(/API key|localhost|端口/);
@@ -862,7 +891,8 @@ describe('native settings integration', () => {
     nativeDialog();await flush();openCodex();
     const budget=document.getElementById('opt-codex-api-budget')!;
     expect(budget.hidden).toBe(false);expect(budget.getAttribute('role')).toBe('group');
-    expect(document.getElementById('opt-codex-context')!.closest('.ide-setting')!.nextElementSibling).toBe(budget);
+    const retention=document.getElementById('opt-codex-context')!.closest('.ide-setting')!.nextElementSibling!;
+    expect(retention.textContent).toContain('On-demand');expect(retention.nextElementSibling).toBe(budget);
     expect(budget.textContent).toContain('may increase API requests, token usage, costs and waiting time');
     expect(budget.textContent).toContain('upper limits, not a fixed number of calls');
     expect(budget.textContent).toContain('future messages');expect(budget.textContent).toContain('partial answer');

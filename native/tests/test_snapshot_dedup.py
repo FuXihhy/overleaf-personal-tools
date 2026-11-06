@@ -10,6 +10,7 @@ import tempfile
 import threading
 import time
 import unittest
+from platform_test_support import assert_private, make_symlink, private_permissions
 import uuid
 from unittest import mock
 
@@ -138,7 +139,7 @@ class SnapshotStorageTests(unittest.TestCase):
         original = publish(self.store, files)
         path = self.store.snapshots / (original + '.json')
         value = json.loads(path.read_text()); value['root_path'] = 'corrupted-missing-root.tex'
-        path.chmod(0o600); path.write_text(json.dumps(value))
+        private_permissions(path, 0o600); path.write_text(json.dumps(value))
         saved = path.read_bytes()
         repaired = publish(self.store, files)
         self.assertNotEqual(original, repaired)
@@ -150,7 +151,7 @@ class SnapshotStorageTests(unittest.TestCase):
         original = publish(self.store, files)
         index = self.index_for(files)
         target = self.base / 'outside'; target.write_text('keep')
-        index.unlink(); index.symlink_to(target)
+        index.unlink(); make_symlink(index, target)
         with self.assertRaisesRegex(context.ProjectContextError, 'symlink'):
             publish(self.store, files)
         self.assertEqual(target.read_text(), 'keep')
@@ -169,7 +170,9 @@ class SnapshotStorageTests(unittest.TestCase):
         snapshot = publish(self.store, {'main.tex': 'keep forever'})
         published = self.store.snapshots / (snapshot + '.json')
         old = time.time() - context.UPLOAD_IDLE_TTL - 60
+        private_permissions(published, 0o600)
         os.utime(published, (old, old))
+        private_permissions(published, 0o400)
         expired = self.store.begin(SCOPE, 'main.tex', manifest({'main.tex': 'unfinished'}))
         active = self.store.begin(SCOPE, 'main.tex', manifest({'main.tex': 'active'}))
         self.age_upload(expired)
@@ -214,7 +217,7 @@ class SnapshotStorageTests(unittest.TestCase):
 
     def test_cleanup_never_follows_upload_directory_symlinks(self):
         outside = self.base / 'outside'; outside.mkdir(); (outside / 'keep').write_text('private')
-        link = self.store.uploads / str(uuid.uuid4()); link.symlink_to(outside, target_is_directory=True)
+        link = self.store.uploads / str(uuid.uuid4()); make_symlink(link, outside, target_is_directory=True)
         self.store.begin(SCOPE, '', [])
         self.assertTrue(link.is_symlink())
         self.assertEqual((outside / 'keep').read_text(), 'private')

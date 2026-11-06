@@ -8,12 +8,14 @@ from pathlib import Path
 import struct
 import subprocess
 import tempfile
+import sys
 import threading
 import time
 import unittest
 from unittest.mock import patch
 
 DIRECTORY = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(DIRECTORY))
 
 
 def module(name, path):
@@ -62,6 +64,13 @@ class ValidationTests(unittest.TestCase):
         self.assertIn("1 MiB", result["diagnostics"][0])
 
     def test_fail_closed_when_sandbox_missing(self):
+        if os.name == 'nt':
+            import windows_tex
+            with patch.object(windows_tex, 'configured', return_value=False):
+                self.assertFalse(host.status()['available'])
+                with self.assertRaisesRegex(host.HostError, '无沙盒'):
+                    host.render(request(PLAIN))
+            return
         with patch.object(host, "SANDBOX", Path("/definitely-missing-sandbox")):
             self.assertFalse(host.status()["available"])
             with self.assertRaisesRegex(host.HostError, "无沙盒"):
@@ -198,7 +207,8 @@ class InstallerTests(unittest.TestCase):
             outside = home / "keep-me.txt"; outside.write_text("retain")
             installation, manifest_path = installer.install("a" * 32, DIRECTORY / "host.py", home)
             self.assertTrue((installation / "host.py").is_file())
-            self.assertIn("/usr/bin/python3", (installation / "launch").read_text())
+            launcher = 'launch.cmd' if os.name == 'nt' else 'launch'
+            self.assertIn(installer.PYTHON, (installation / launcher).read_text())
             self.assertEqual(json.loads(manifest_path.read_text())["allowed_origins"], ["chrome-extension://" + "a" * 32 + "/"])
             installer.uninstall(home)
             self.assertFalse(installation.exists())

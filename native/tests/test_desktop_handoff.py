@@ -448,6 +448,63 @@ class DesktopHandoffTests(unittest.TestCase):
         self.assertFalse(any(method == 'interrupt' for method, _ in self.ipc.calls))
         self.assert_owner_retained()
 
+    def test_owner_empty_stop_snapshot_preserves_delivered_partial(self):
+        self.ipc.finished = False
+        self.owner_snapshot('inProgress', text='Partial answer.')
+        self.ask()
+        self.assertEqual(self.messages.wait('delta')['text'], 'Partial answer.')
+        self.native.handle({'version': 1, 'id': 'stop', 'op': 'cancel', 'projectId': request()['projectId']})
+        self.messages.wait('done', 'stop')
+        done = self.messages.wait('done')
+        self.assertTrue(done['cancelled'])
+        self.assertEqual(done['text'], 'Partial answer.')
+        self.assertEqual(self.store.page(request())['messages'][-1]['text'], 'Partial answer.')
+        self.assertEqual([value for method, value in self.ipc.calls if method == 'interrupt'], [TURN])
+        self.assert_owner_retained()
+
+    def test_durable_completion_wins_over_empty_owner_stop_snapshot(self):
+        self.ipc.finished = False
+        self.owner_snapshot('inProgress', text='A longer unfinished answer.')
+        self.ask()
+        self.messages.wait('delta')
+        self.world.turns[-1]['status'] = 'completed'
+        self.world.turns[-1]['items'][1]['text'] = 'Final.'
+        self.owner_snapshot('interrupted', revision=2)
+        done = self.messages.wait('done')
+        self.assertFalse(done['cancelled'])
+        self.assertEqual(done['text'], 'Final.')
+        self.assertEqual(self.store.page(request())['messages'][-1]['text'], 'Final.')
+        self.assert_owner_retained()
+
+    def test_owner_empty_active_snapshot_does_not_erase_stop_fallback(self):
+        self.ipc.finished = False
+        self.owner_snapshot('inProgress', text='Delivered partial.')
+        self.ask()
+        self.messages.wait('delta')
+        self.owner_snapshot('inProgress', revision=2)
+        self.owner_snapshot('interrupted', revision=3)
+        done = self.messages.wait('done')
+        self.assertTrue(done['cancelled'])
+        self.assertEqual(done['text'], 'Delivered partial.')
+        self.assertEqual(self.store.page(request())['messages'][-1]['text'], 'Delivered partial.')
+        self.assert_owner_retained()
+
+    def test_durable_empty_completion_does_not_retain_streamed_draft(self):
+        self.ipc.finished = False
+        self.owner_snapshot('inProgress', text='Discarded draft.')
+        self.ask()
+        self.messages.wait('delta')
+        self.world.turns[-1]['status'] = 'completed'
+        self.world.turns[-1]['items'][1]['text'] = ''
+        self.owner_snapshot('interrupted', revision=2)
+        done = self.messages.wait('done')
+        self.assertFalse(done['cancelled'])
+        self.assertEqual(done['text'], '')
+        with self.store.database(request()) as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM messages WHERE conversation=? AND id=?',
+                                         (THREAD, TURN + ':assistant:0')).fetchone()[0], 0)
+        self.assert_owner_retained()
+
     def test_owner_answer_limit_stops_only_the_confirmed_turn_once(self):
         self.ipc.finished = False
         self.owner_snapshot('inProgress', text='x' * 450001)

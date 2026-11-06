@@ -11,6 +11,7 @@ import threading
 import time
 from types import SimpleNamespace
 import unittest
+from platform_test_support import assert_private, make_symlink, private_permissions
 from unittest import mock
 import uuid
 
@@ -36,8 +37,8 @@ class ProfileTests(unittest.TestCase):
         restored = ProfileStore(self.store.root)
         self.assertEqual(restored.list(), [profile])
         self.assertEqual(restored.get(profile['id'])['apiKey'], 'synthetic-private-key')
-        self.assertEqual(self.store.root.stat().st_mode & 0o777, 0o700)
-        self.assertEqual(self.store.path.stat().st_mode & 0o777, 0o600)
+        assert_private(self, self.store.root, 0o700)
+        assert_private(self, self.store.path, 0o600)
         self.assertNotIn('synthetic-private-key', json.dumps(restored.list()))
 
     def test_blank_key_preserves_secret_and_address_cannot_change(self):
@@ -68,7 +69,7 @@ class ProfileTests(unittest.TestCase):
         profile = self.make()
         os.chmod(self.store.path, 0o644)
         self.assertEqual(self.store.get(profile['id'])['apiKey'], 'synthetic-private-key')
-        self.assertEqual(self.store.path.stat().st_mode & 0o777, 0o600)
+        assert_private(self, self.store.path, 0o600)
 
     def test_delete_does_not_expose_secret_or_allow_unknown_update(self):
         profile = self.make()
@@ -79,7 +80,7 @@ class ProfileTests(unittest.TestCase):
 
     def test_symlink_files_refused(self):
         target = Path(self.temp.name) / 'other'; target.write_text('[]')
-        self.store.path.symlink_to(target)
+        make_symlink(self.store.path, target)
         with self.assertRaises(APIError): self.make()
         self.assertEqual(target.read_text(), '[]')
 
@@ -261,6 +262,7 @@ class TransportTests(unittest.TestCase):
 class LocalHTTPTests(unittest.TestCase):
     def setUp(self):
         self.release=threading.Event(); self.started=threading.Event(); self.requests=[]
+        self.stall_headers=False; self.pause_utf8=False
         outer=self
         class Handler(BaseHTTPRequestHandler):
             protocol_version='HTTP/1.1'
@@ -268,12 +270,19 @@ class LocalHTTPTests(unittest.TestCase):
             def do_POST(self):
                 payload=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
                 outer.requests.append(payload)
+                if outer.stall_headers:
+                    outer.started.set(); outer.release.wait(3)
+                    return
                 self.send_response(200); self.send_header('Content-Type','text/event-stream')
                 self.send_header('Connection','close'); self.end_headers()
                 content=event(chunk('数学'))
                 # Split the UTF-8 bytes across network writes, not characters.
-                for byte in content:
+                for index, byte in enumerate(content):
                     self.wfile.write(bytes([byte])); self.wfile.flush()
+                    if outer.pause_utf8 and index == content.index('数'.encode('utf-8')):
+                        # Pause inside a UTF-8 codepoint and an SSE line. The
+                        # raw receive timeout must not discard buffered bytes.
+                        time.sleep(.25)
                 outer.started.set()
                 outer.release.wait(3)
                 try:
@@ -293,13 +302,31 @@ class LocalHTTPTests(unittest.TestCase):
         self.assertEqual(len(self.requests),1)
 
     def test_cancel_interrupts_connection_close_socket_promptly(self):
+        self._cancel_stalled_request(close=True)
+
+    def test_cancellation_event_interrupts_stalled_response_without_close(self):
+        self._cancel_stalled_request(close=False)
+
+    def test_cancel_interrupts_stalled_response_headers_promptly(self):
+        self.stall_headers=True
+        self._cancel_stalled_request(close=True)
+
+    def test_fragmented_utf8_survives_idle_receive_timeout(self):
+        self.pause_utf8=True
+        self.test_real_loopback_fragmented_utf8_stream()
+
+    def _cancel_stalled_request(self, close):
         cancelled=threading.Event(); api=APIConnection(self.profile,cancelled); values=[]; errors=[]
         def run():
             try: api.stream([],values.append)
             except APIError as error: errors.append(str(error))
         worker=threading.Thread(target=run);worker.start()
-        self.assertTrue(self.started.wait(2)); cancelled.set(); api.close(); worker.join(1)
+        self.assertTrue(self.started.wait(2)); stopped_at=time.monotonic(); cancelled.set()
+        if close:
+            api.close()
+        worker.join(max(0, 1 - (time.monotonic() - stopped_at)))
         self.assertFalse(worker.is_alive(),'Cancellation must interrupt a stalled HTTPResponse')
+        self.assertLess(time.monotonic() - stopped_at, 1, 'Closing the transport is part of the cancellation deadline')
         self.assertEqual(len(self.requests),1)
         self.assertTrue(errors)
 
@@ -572,7 +599,9 @@ class BackendTests(unittest.TestCase):
             def stream(messages,on_delta,tools,tool_choice='auto'):
                 connection.messages=messages;connection.tool_choice=tool_choice
                 if tool_choice=='auto':
-                    self.assertLessEqual(connection.deadline,520)
+                    # Subtracting monotonic floating-point timestamps can
+                    # exceed the exact 520-second bound by a few ulps.
+                    self.assertLessEqual(connection.deadline,520 + 1e-6)
                     connection.timed_out=True
                     raise APIError('Controlled lookup deadline')
                 on_delta('Useful partial review.')

@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from platform_test_support import assert_private, make_symlink, private_permissions
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from project_context import MAX_FILE_BYTES, ProjectContextError, ProjectContextStore
@@ -97,8 +98,8 @@ class ProjectContextTests(unittest.TestCase):
         self.assertEqual(third, first)
         self.assertEqual((self.store.snapshots / (first + '.json')).read_bytes(), original)
         self.assertEqual(self.store.get(SCOPE, first)['files'][0]['content'], 'first')
-        self.assertEqual(self.store.root.stat().st_mode & 0o777, 0o700)
-        self.assertEqual((self.store.snapshots / (first + '.json')).stat().st_mode & 0o777, 0o400)
+        assert_private(self, self.store.root, 0o700)
+        assert_private(self, (self.store.snapshots / (first + '.json')), 0o400)
 
     def test_paths_root_and_manifest_limits_are_strict(self):
         for path in ('../main.tex', '/tmp/main.tex', 'a//b', 'a/./b', 'a\\b', 'a\x00b', 'C:main.tex'):
@@ -132,19 +133,19 @@ class ProjectContextTests(unittest.TestCase):
             self.store.chunk(SCOPE, identifier, 'main.tex', 0, '\U0001f600' * 100001)
 
     def test_symlink_roots_parents_upload_blobs_and_snapshot_files_are_rejected(self):
-        link = self.base / 'linked'; link.symlink_to(self.store.root, target_is_directory=True)
+        link = self.base / 'linked'; make_symlink(link, self.store.root, target_is_directory=True)
         with self.assertRaises(ProjectContextError):
             ProjectContextStore(link)
         with self.assertRaises(ProjectContextError):
             ProjectContextStore(link / 'child')
-        target = self.base / 'private'; target.write_text('unchanged'); target.chmod(0o600)
+        target = self.base / 'private'; target.write_text('unchanged'); private_permissions(target, 0o600)
         identifier = self.store.begin(SCOPE, 'main.tex', manifest({'main.tex': 'x'}))
-        blob = self.store._blob(self.store.uploads / identifier, 'main.tex'); blob.symlink_to(target)
+        blob = self.store._blob(self.store.uploads / identifier, 'main.tex'); make_symlink(blob, target)
         with self.assertRaises(ProjectContextError):
             self.store.chunk(SCOPE, identifier, 'main.tex', 0, 'x')
         with self.assertRaises(ProjectContextError):
             self.store.commit(SCOPE, identifier)
-        snapshot_path = self.store.snapshots / ('a' * 64 + '.json'); snapshot_path.symlink_to(target)
+        snapshot_path = self.store.snapshots / ('a' * 64 + '.json'); make_symlink(snapshot_path, target)
         with self.assertRaises(ProjectContextError):
             self.store.read_snapshot('a' * 64)
         self.assertEqual(target.read_text(), 'unchanged')
@@ -153,7 +154,7 @@ class ProjectContextTests(unittest.TestCase):
         snapshot_id = upload(self.store, {'main.tex': 'original'})
         entry = manifest({'main.tex': 'original'})[0]
         path = self.store._content_blob(SCOPE, entry['sha256'])
-        path.chmod(0o600); path.write_text('replaced')
+        private_permissions(path, 0o600); path.write_text('replaced')
         with self.assertRaisesRegex(ProjectContextError, 'integrity'):
             self.store.read_snapshot(snapshot_id)
         with self.assertRaises(ProjectContextError):

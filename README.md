@@ -1,12 +1,16 @@
 # Overleaf Personal Tools
 
+**0.12.17 Windows 开发分支（2026-11-06）**：本分支已实现 Windows helper、Native Messaging 注册、私有 ACL/文件锁、Codex Desktop named pipe、本机 TeX AppContainer，以及普通、按需和本地保留三种项目缓存模式。0.12.16 修复真实 Chrome 页面身份被误拒绝及连接成功提示误导；0.12.17 修复真实交互中发现的中断回答丢失与预览旧错误残留，见 [连接修复与交互验收记录](docs/windows-connection-acceptance.md)。安装与更新见 [Windows 开发版说明](docs/windows-development.md)，前一版本验证见 [Windows 验收记录](docs/windows-acceptance.md)。以下旧版本说明保留原功能背景，不能作为 Windows 已验收的证据。
+
 0.12.14：仅作用于 Overleaf 英文站 `https://www.overleaf.com/project/*` 和中文站 `https://cn.overleaf.com/project/*` 的个人 Chrome 扩展。根据项目宏包声明和自定义宏补充原生自动补全，在 Code 和 LaTeX Visual 模式中提供独立的 **MathJax / TeX** 公式预览。TeX 模式可再选择 **Overleaf 云端 / 本机** 编译。**Codex Assistant** 支持文稿选区提问、回答引用追问、项目对话历史、左右面板和 LaTeX 复制；默认使用本机 Codex，也可按项目选择自己的 DeepSeek 或其他兼容 API。
 
 ## 下载与跨平台状态
 
 完整源码包含 **LaTeX Preview 和 Codex Assistant 两部分**、本机连接程序、测试与构建配置。预构建扩展和源码 ZIP 在本仓库的 [Releases](https://github.com/FuXihhy/overleaf-personal-tools/releases) 下载；私有仓库需要先登录有访问权限的 GitHub 账号。
 
-**Windows 用户先看 [Windows 安装与适配说明](docs/windows.md)。** Chrome 145+ 可以加载浏览器扩展，浏览器内补全、MathJax 和 Overleaf 云端预览尚待 Windows 实机验收。目前配套本机连接仍仅实现 macOS；Codex、DeepSeek／兼容 API 问答以及本机 TeX 预览不能仅靠加载扩展在 Windows 上使用。上传源码是为了后续跨平台安装、调试与适配，不代表这些功能已经适配完成。
+**Windows 新用户先看 [一条命令安装与验收指南](acceptance/README.md)。** 它提供安装/检查脚本、可一次上传的合成项目、必要的用户操作和通过标准；本机 TeX、自己的 API、桌面续聊等按需选择。实现细节见 [Windows 开发版说明](docs/windows-development.md)。本开发分支提供 Windows 本机连接；原始 v0.12.14 发布包仅提供 macOS 本机连接，两者不能混用验收结论。脚本不会把后台检查冒充真实问答或浏览器验收。
+
+**macOS 维护者参考[共享修复与回归清单](docs/cross-platform-fixes-0.12.17.md)。** Windows 验收发现的页面身份、连接状态、停止后文本保留和预览状态问题涉及共享代码；文档逐项标注实现、测试、迁移依赖和 Windows 专用部分。可分享的历史实测截图与摘要见[验收证据](acceptance/evidence/2026-11-06/README.md)，它不代表已在 macOS 或新用户机器通过。
 
 发布文件不包含用户的 API 密钥、Codex 登录状态、聊天数据库、Overleaf 项目缓存或真实文稿截图。切换电脑后需要使用该电脑自己的登录和配置。
 
@@ -30,13 +34,15 @@ Extension 父项只展开或收起两个子项，原有预览设置完整保留�
 
 ## Codex Assistant
 
-Codex Assistant 默认使用本机 Codex 的现有登录，通过单独的 Native Messaging 连接程序与扩展通信。Native Messaging 是 Chrome 启动本机程序并通过标准输入/输出交换消息的机制；这里不启动 localhost 服务。默认 Codex 模式需要 macOS 上可用且已登录的 Codex App 或 CLI，模型和使用额度沿用本机 Codex 配置。0.10.0 也支持自备 DeepSeek 或其他兼容 OpenAI Chat Completions 的 API；此模式仍需安装连接程序，但不需要 Codex 登录，按所选 API 服务的用量计费。
+Codex Assistant 默认使用本机 Codex 的现有登录，通过单独的 Native Messaging 连接程序与扩展通信。Native Messaging 是 Chrome 启动本机程序并通过标准输入/输出交换消息的机制；这里不启动 localhost 服务。默认 Codex 模式需要本机可用且已登录的 Codex App 或 CLI，模型和使用额度沿用本机 Codex 配置。Windows 安装命令见上方开发版说明；下面的 `/usr/bin/python3` 命令用于 macOS。0.10.0 也支持自备 DeepSeek 或其他兼容 OpenAI Chat Completions 的 API；此模式仍需安装连接程序，但不需要 Codex 登录，按所选 API 服务的用量计费。
 
 在本项目根目录执行独立安装命令：
 
 ```sh
 /usr/bin/python3 native/install_codex.py --install
 ```
+
+上面不带工作区的命令适合更新已有绑定或只使用 API。首次需要为新 Codex 聊天配置已有 Overleaf 项目的工作目录和 app-server 项目 ID 时，应加 `--workspace /absolute/path/to/Overleaf`（Windows 的完整命令与配置审计见 [安装说明](docs/windows-development.md)）。没有现有 `workspace.json` 时，单独 `--install` 会使用 helper 的私有数据目录。app-server 绑定与 Desktop 侧栏分类是独立记录；即使新线程的工作目录和 backend 项目 ID 正确，新旧聊天仍可能需要在 Desktop 使用 Move / 移动到项目操作归入 Overleaf。补配置不自动迁移旧聊天，扩展不直接改写 Desktop 全局状态或聊天库。
 
 它注册 `com.overleaf.personal_tools.codex`，与公式预览的 TeX 连接程序分别安装、分别更新。只运行扩展构建或旧的 `native/install.py` 不会安装 Codex 连接程序。安装后重新加载扩展、刷新 Overleaf，打开 **Settings → Extension → Codex Assistant** 即自动读取登录状态、可用模型和各模型支持的推理强度；此操作不发送提问。加载时显示进度，失败时可点击 **重试连接 / Retry connection**，也可用 **检查连接 / Check connection** 主动刷新。成功结果在当前页面保留五分钟；若正在生成回答，检查延后到回答结束，避免打断。完整安装、卸载及运行说明见 [Codex 本机连接](docs/codex-backend.md)。
 
@@ -52,7 +58,7 @@ Codex Assistant 默认使用本机 Codex 的现有登录，通过单独的 Nativ
 2. 新建连接，填写名称、API base URL、模型 ID 和 API key；可使用 DeepSeek 预设，再按自己的账号填写密钥和模型。保存后可点 **Check connection / 检查连接**。
 3. 返回 Overleaf 设置，刷新连接列表，在 **Model source / 模型来源** 选择该连接，最后保存项目设置。
 
-支持保存多个连接，选择按 Overleaf 账号与项目分别保存。连接管理页只向本机程序提交密钥；密钥不会填入 Overleaf 页面或 Chrome storage。本机将其保存在权限受限的文件中（目录 `0700`、文件 `0600`），不是 macOS Keychain。编辑已有连接时留空密钥会保留原值；更换服务地址需新建连接，避免把原会话发往另一个地址。删除连接会保留已有本地历史。
+支持保存多个连接，选择按 Overleaf 账号与项目分别保存。连接管理页只向本机程序提交密钥；密钥不会填入 Overleaf 页面或 Chrome storage。本机将其保存在权限受限的文件中（macOS 目录 `0700`、文件 `0600`；Windows 为当前用户和 SYSTEM 的受保护 ACL），不是系统加密凭据保险库。编辑已有连接时留空密钥会保留原值；更换服务地址需新建连接，避免把原会话发往另一个地址。删除连接会保留已有本地历史。
 
 检查连接只向已保存的地址请求 `/models`，不发送问题或文稿。成功读取列表不等于已验证实际问答能力；空模型列表尤其不表示所填模型可用。Overleaf 设置中的 API 状态只确认本机保存的配置，实际服务检查在连接管理页进行。API 需支持 `/chat/completions` 的文本回答；支持流式或普通 JSON 响应。地址使用 HTTPS，本机服务可用 loopback HTTP。
 
@@ -98,7 +104,7 @@ Codex 桌面续聊可使用同一快照引用和 `overleaf_project` MCP；读取
 
 每条 Codex 回答的 **Copy source / 复制原文** 按钮复制完整原始 Markdown，保留公式 LaTeX。公式没有浮动复制按钮。在 **Settings → Extension → Codex Assistant** 可启用默认关闭的 **Click formulas to copy LaTeX / 单击公式复制 LaTeX**，启用后单击完整公式即可复制不含定界符的 TeX，成功时保留短暂淡色反馈。独立的 **Show formula copied notice / 显示公式复制提示** 开关默认关闭；开启后还会短暂显示小型“公式已复制”提示，不抢输入焦点。普通文字选区跨过已渲染的公式时，公式也会显示选中高亮，Cmd/Ctrl+C 保留原公式源码。复制不修改正文或当前引用。
 
-可将此扩展已登记的 Codex 会话归入已有的 Codex 项目，后续会话沿用安装时配置的工作目录；网页的账号／项目隔离不变。在 macOS 中指定已有 Codex 项目目录，例如：
+可为此扩展后续创建的 Codex 会话配置已有 app-server 项目及工作目录；网页的账号／项目隔离不变。Desktop 侧栏归类仍需单独核验，不能由以下安装命令保证。在 macOS 中指定已有 Codex 项目目录，例如：
 
 ```sh
 /usr/bin/python3 native/install_codex.py --install --workspace "$HOME/Documents/Overleaf"

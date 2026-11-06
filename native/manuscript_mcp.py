@@ -249,7 +249,9 @@ def main(argv=None):
         except (ValueError, UnicodeError):
             response = {'jsonrpc': '2.0', 'id': None, 'error': {'code': -32700, 'message': 'Invalid or oversized JSON message.'}}
         if response is not None:
-            sys.stdout.write(_json(response) + '\n'); sys.stdout.flush()
+            # MCP stdio is UTF-8 JSONL regardless of the Windows pipe locale.
+            sys.stdout.buffer.write((_json(response) + '\n').encode('utf-8'))
+            sys.stdout.buffer.flush()
 
 
 if __name__ == '__main__':

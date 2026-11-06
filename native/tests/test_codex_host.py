@@ -89,6 +89,9 @@ class FakeServer:
             return {'account': {'type': 'chatgpt', 'email': 'not-exposed@example.com'}, 'requiresOpenaiAuth': True}
         if method == 'model/list':
             return {'data': [{'id': 'test', 'model': 'test-model', 'displayName': 'Test', 'supportedReasoningEfforts': [{'reasoningEffort': 'high'}]}]}
+        if method == 'mcpServerStatus/list':
+            return {'data': [{'name': 'overleaf_project', 'tools': {name: {'name': name} for name in
+                    ('list_project_files', 'search_project', 'read_project_file')}}]}
         if method == 'thread/read':
             return {'thread': {'id': params['threadId'], 'updatedAt': 100, 'historyMode': 'paginated', 'status': {'type': 'notLoaded'}}}
         if method == 'thread/turns/list':
@@ -285,10 +288,16 @@ class StoreTests(unittest.TestCase):
         with self.store.lock(value):
             with self.assertRaises(host.HostError):
                 with host.SessionStore(self.store.root).lock(value):pass
-    def test_rejects_symlink_and_invalid_thread(self):
+    def test_rejects_invalid_thread(self):
         with self.assertRaises(host.HostError):self.store.write(request(),'../../evil')
+    def test_rejects_symlink(self):
         target=Path(self.temp.name)/'secret';target.write_text('untouched')
-        self.store.path(request()).symlink_to(target)
+        try:
+            self.store.path(request()).symlink_to(target)
+        except OSError as error:
+            if getattr(error, 'winerror', None) == 1314:
+                self.skipTest('Windows user lacks symlink creation privilege; junction attacks have separate tests.')
+            raise
         with self.assertRaises(host.HostError):self.store.read(request())
         with self.assertRaises(host.HostError):self.store.reset(request())
         self.assertEqual(target.read_text(),'untouched')
@@ -305,6 +314,7 @@ class HostTests(unittest.TestCase):
         self.native.handle({'version':1,'id':'status','op':'status'})
         result=self.messages.wait('status','status')
         self.assertTrue(result['authenticated']);self.assertEqual(result['models'][0]['id'],'test-model')
+        self.assertEqual(result['connectionKind'], 'standalone');self.assertTrue(result['projectReaderReady'])
         self.assertNotIn('email',json.dumps(result))
         self.assertNotIn('not-exposed',json.dumps(result))
         self.assertFalse(any(call[0].startswith('thread/') for call in self.server.calls))
@@ -379,8 +389,8 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(json.loads(manifest.read_text())['allowed_origins'],['chrome-extension://'+identifier+'/'])
             self.assertTrue((directory/'codex_host.py').exists())
             self.assertEqual((directory/'prompt_display.py').read_bytes(),(ROOT/'native/prompt_display.py').read_bytes())
-            self.assertIn('codex_host.py',(directory/'launch').read_text())
-            unrelated=root/'Library/Application Support/OverleafPersonalTools/native-host';unrelated.mkdir();(unrelated/'keep').write_text('keep')
+            self.assertIn('codex_host.py',(directory/installer.LAUNCH_NAME).read_text())
+            unrelated=directory.parent/'native-host';unrelated.mkdir();(unrelated/'keep').write_text('keep')
             installer.install(identifier,ROOT/'native/codex_host.py',root)
             installer.uninstall(root)
             self.assertFalse(manifest.exists());self.assertEqual((unrelated/'keep').read_text(),'keep')

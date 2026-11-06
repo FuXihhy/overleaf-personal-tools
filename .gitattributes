@@ -1,0 +1,4 @@
+# Vite's SSR transform must see LF-terminated hashbangs. CRLF hashbangs can
+# survive its stripping step and become invalid syntax after injected imports.
+*.mjs text eol=lf
+*.sh text eol=lf

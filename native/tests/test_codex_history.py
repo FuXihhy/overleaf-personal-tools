@@ -7,6 +7,7 @@ import time
 import unittest
 from unittest import mock
 from test_codex_host import host, installer, ROOT, request, FakeServer, Messages, PROJECT, THREAD
+from platform_utils import is_private
 
 OTHER = '99999999-2222-3333-4444-555555555555'
 
@@ -36,7 +37,7 @@ class HistoryStoreTests(unittest.TestCase):
         self.assertEqual(page['messages'][0]['selection']['text'], 'x+y')
         self.assertEqual(page['messages'][0]['text'], 'Original question')
         self.assertFalse(old.exists())
-        self.assertEqual((self.store.root / 'history.sqlite3').stat().st_mode & 0o777, 0o600)
+        self.assertTrue(is_private(self.store.root / 'history.sqlite3'))
 
     def test_migrates_old_message_schema_and_preserves_both_quote_kinds(self):
         # Make the exact pre-answer-quotation table, with an existing row.
@@ -114,7 +115,12 @@ class HistoryStoreTests(unittest.TestCase):
 
     def test_database_symlinks_are_not_followed(self):
         target = Path(self.temp.name) / 'unrelated'; target.write_text('unchanged')
-        (self.store.root / 'history.sqlite3').symlink_to(target)
+        try:
+            (self.store.root / 'history.sqlite3').symlink_to(target)
+        except OSError as error:
+            if getattr(error, 'winerror', None) == 1314:
+                self.skipTest('Windows user lacks symlink creation privilege; junction attacks have separate tests.')
+            raise
         with self.assertRaises(host.HostError): self.store.read(request())
         self.assertEqual(target.read_text(), 'unchanged')
 
@@ -251,6 +257,56 @@ class HistoryHostTests(unittest.TestCase):
         self.assertEqual(messages[1]['text'], 'First ')
         self.assertEqual(messages[0]['selection'], request()['selection'])
 
+    def test_stop_partial_survives_canonical_refresh_and_helper_restart(self):
+        self.server.finish = False
+        self.native.handle(request()); self.messages.wait('delta')
+        self.native.handle({'version': 1, 'id': 'stop', 'op': 'cancel', 'projectId': PROJECT})
+        self.messages.wait('done', 'stop')
+        done = self.messages.wait('done')
+        self.assertTrue(done['cancelled'])
+        self.assertEqual(done['text'], 'First ')
+        saved = self.native.store.page(request())['messages']
+        self.assertEqual([item['text'] for item in saved], [request()['question'], 'First '])
+        # The real app-server can persist the interrupted turn without an
+        # agentMessage item even though it already delivered assistant deltas.
+        canonical = {'data': [{'id': self.server.current_turn, 'status': 'interrupted',
+                              'items': [{'type': 'userMessage', 'content': [
+                                  {'type': 'text', 'text': request()['question']}]}]}], 'nextCursor': None}
+        self.server.pages = [canonical]
+        self.native.handle(history(id='after-stop'))
+        refreshed = self.messages.wait('history', 'after-stop')
+        self.assertEqual(refreshed['messages'], saved)
+        self.assertEqual(refreshed['remoteState'], 'idle')
+        self.assertEqual(sum(method == 'turn/start' for method, _ in self.server.calls), 1)
+
+        root = self.native.store.root
+        self.native.close()
+        self.server = HistoryServer(Path(self.temp.name))
+        self.server.pages = [canonical]
+        self.native = host.NativeHost(io.BytesIO(), host.SessionStore(root), lambda cwd, **kwargs: self.server)
+        self.native.handle(history(id='after-restart'))
+        restored = self.messages.wait('history', 'after-restart')
+        self.assertEqual(restored['messages'], saved)
+        self.assertFalse(any(method in ('thread/start', 'thread/resume', 'turn/start')
+                             for method, _ in self.server.calls))
+
+    def test_stop_keeps_unfinished_item_after_an_earlier_completed_item(self):
+        self.server.finish = False
+        self.native.handle(request()); self.messages.wait('delta')
+        turn_id = self.server.current_turn
+        self.server.events.put({'method': 'item/completed', 'params': {'threadId': THREAD,
+            'turnId': turn_id, 'item': {'id': 'answer', 'type': 'agentMessage',
+                                      'phase': 'final_answer', 'text': 'First section.'}}})
+        self.server.events.put({'method': 'item/agentMessage/delta', 'params': {
+            'threadId': THREAD, 'turnId': turn_id, 'itemId': 'second', 'delta': 'Second partial.'}})
+        self.native.handle({'version': 1, 'id': 'stop', 'op': 'cancel', 'projectId': PROJECT})
+        self.messages.wait('done', 'stop')
+        done = self.messages.wait('done')
+        self.assertTrue(done['cancelled'])
+        self.assertEqual(done['text'], 'First section.\n\nSecond partial.')
+        messages = self.native.store.page(request())['messages']
+        self.assertEqual([item['text'] for item in messages], [request()['question'], done['text']])
+
     def test_rejected_start_does_not_store_a_ghost_question(self):
         original = self.server.request
         def rejecting(method, params, timeout=None):
@@ -370,7 +426,16 @@ class WorkspaceTests(unittest.TestCase):
                           {'workspace': str(root), 'projectId': 'bad'}, {'workspace': str(root), 'command': 'bad'}):
                 config.write_text(json.dumps(value))
                 with self.assertRaises(host.HostError): host.workspace_configuration(root, config)
-            config.unlink(); target = root/'other'; target.write_text('{}'); config.symlink_to(target)
+    def test_workspace_configuration_rejects_symlink(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); config = root/'workspace.json'
+            target = root/'other'; target.write_text('{}')
+            try:
+                config.symlink_to(target)
+            except OSError as error:
+                if getattr(error, 'winerror', None) == 1314:
+                    self.skipTest('Windows user lacks symlink creation privilege; junction attacks have separate tests.')
+                raise
             with self.assertRaises(host.HostError): host.workspace_configuration(root, config)
 
     def test_start_and_resume_use_configured_workspace_but_private_history_root(self):
@@ -402,7 +467,7 @@ class WorkspaceTests(unittest.TestCase):
             directory, _ = installer.install('a'*32, source, root, workspace, OTHER)
             path = directory/'workspace.json'; original = path.read_text()
             self.assertEqual(json.loads(original), {'workspace': str(workspace.resolve()), 'projectId': OTHER})
-            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertTrue(is_private(path))
             installer.install('a'*32, source, root)
             self.assertEqual(path.read_text(), original)
 

@@ -3,6 +3,7 @@ import type { TexHostStatus, TexRenderRequest, TexRenderResult } from './preview
 import { isOverleafOrigin } from './overleaf/origin';
 import { registerCloudCoordinator } from './cloud-coordinator-background';
 import { registerCodexTransport, registerCodexHistory } from './codex/background';
+import { registerProjectCacheLifecycle } from './codex/cache-lifecycle';
 
 export const TEX_NATIVE_HOST = 'com.overleaf.personal_tools';
 const TIMEOUT_MS = 30_000;
@@ -193,8 +194,9 @@ export function registerNativeTransport(runtime: NativeRuntime, tabRemoval?: Tab
 
 if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) registerNativeTransport(chrome.runtime, chrome.tabs?.onRemoved);
 if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage?.local && chrome.storage?.session) {
+  const cache=typeof chrome.tabs?.query==='function' && chrome.alarms?.onAlarm ? registerProjectCacheLifecycle({runtime:chrome.runtime,storage:chrome.storage.local,tabs:chrome.tabs,alarms:chrome.alarms},allowedNativeSender) : undefined;
   registerCloudCoordinator(chrome.runtime, chrome.storage, allowedNativeSender);
-  registerCodexHistory(chrome.runtime, chrome.storage.local, allowedNativeSender);
+  registerCodexHistory(chrome.runtime, chrome.storage.local, allowedNativeSender,cache);
 }
 if (typeof chrome !== 'undefined' && chrome.runtime?.onConnect) registerCodexTransport(chrome.runtime, allowedNativeSender);
 

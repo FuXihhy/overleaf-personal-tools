@@ -169,6 +169,37 @@ class SyncTests(unittest.TestCase):
         self.assertNotEqual(second['syncRevision'], third['syncRevision'])
         self.assertEqual(third['messages'], self.sync()['messages'])
 
+    def test_interrupted_partial_fragments_yield_to_later_authoritative_answers(self):
+        partial = 'Unfinished streamed answer. ' * 20000
+        self.store.record(request(), THREAD, 'stopped:assistant', 'assistant', partial, created=11000)
+        original = self.store.page(request())['messages'][0]['messageId']
+        self.world.turns = [turn('stopped', 'Question', '', 'interrupted')]
+        self.world.turns[0]['items'].pop()
+        first = self.sync()
+        assistants = [item for item in first['messages'] if item['role'] == 'assistant']
+        self.assertGreater(len(assistants), 1)
+        self.assertEqual(''.join(item['text'] for item in assistants), partial)
+        self.assertEqual(first['messages'], self.sync()['messages'])
+
+        # A later canonical answer, even a shorter one, replaces the fallback
+        # under its existing display ID and removes every obsolete fragment.
+        for status, answer in [('interrupted', 'Canonical partial.'),
+                               ('completed', 'Final.'), ('completed', 'Later Desktop edit.')]:
+            self.world.turns[0] = turn('stopped', 'Question', answer, status)
+            self.world.updated += 1
+            page = self.sync()
+            self.assertEqual([item['text'] for item in page['messages']], ['Question', answer])
+            self.assertEqual(page['messages'][1]['messageId'], original)
+            self.assertEqual(page['messages'], self.sync()['messages'])
+
+    def test_completed_without_answer_still_clears_streamed_fallback(self):
+        self.store.record(request(), THREAD, 'completed:assistant', 'assistant', 'Discarded draft', created=11000)
+        self.world.turns = [turn('completed', 'Question', '')]
+        self.world.turns[0]['items'].pop()
+        page = self.sync()
+        self.assertEqual([item['text'] for item in page['messages']], ['Question'])
+        self.assertEqual(page['messages'], self.sync()['messages'])
+
     def test_fresh_writer_resumes_desktop_context_and_closes_after_each_answer(self):
         self.world.turns = [turn('desktop', 'Question written in Codex desktop', 'Desktop answer')]
         page = self.sync(); observer = self.native.server

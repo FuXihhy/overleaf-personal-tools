@@ -103,7 +103,7 @@ export const codexPanelStyles = `
 #opt-codex-panel .opt-codex-connection-label { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 #opt-codex-panel .opt-codex-connection-dot { flex:0 0 6px; height:6px; border-radius:50%; background:currentColor; }
 #opt-codex-panel .opt-codex-connection[data-state=connected] .opt-codex-connection-dot { background:var(--content-positive,#57a575); }
-#opt-codex-panel .opt-codex-connection:is([data-state=checking],[data-state=reconnecting]) .opt-codex-connection-dot { background:var(--content-warning,#c99541); }
+#opt-codex-panel .opt-codex-connection:is([data-state=checking],[data-state=reconnecting],[data-state=blocked]) .opt-codex-connection-dot { background:var(--content-warning,#c99541); }
 #opt-codex-panel .opt-codex-connection:is([data-state=offline],[data-state=auth-required]) .opt-codex-connection-dot { background:var(--content-danger,#bf6b6b); }
 #opt-codex-panel .opt-codex-connection-announcement { position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip-path:inset(50%); white-space:nowrap; border:0; }
 #opt-codex-panel .opt-codex-remote-status { margin:0 0 7px; color:var(--opt-codex-muted); font-size:.85em; line-height:1.45; }

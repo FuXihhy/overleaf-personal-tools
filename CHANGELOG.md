@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.12.17 Windows development — 2026-11-06（独立开发分支，未发布）
+
+- 新增 `scripts/windows-acceptance.py` 与 `acceptance/README.md`：显式一条命令安装/更新、默认无推理健康检查、可选完整回归、脱敏报告及两文件合成项目 ZIP；区分 PASS/FAIL/SKIP/MANUAL。API-only 安装不要求 Codex 程序或登录；本机 TeX 权限仅在显式请求时配置。
+- 验收工具以专属 Job 管理进程树，校验分段 Native Messaging 帧和特殊字符路径，拒绝零测试/截断输出的假通过。补充可分享的真实验收截图、脚本验证报告及供 macOS 迁移的共享修复清单。
+
+- 真实交互验收发现停止后的部分回答会在历史同步时消失：上游 interrupted turn 缺少正式答案时保留本地已接收文本；正式答案后来到达仍替换并去重，completed 的空答案仍保持权威。
+- 修复中断时较早完成的消息片段遮住后续流式片段，以及 Desktop 空的活动／中断快照清空已接收内容的问题。
+- 预览错误按请求归属管理。当前编译成功或切换引擎后清除自己仍持有的旧错误，保留更新的设置／索引状态；迟到草稿不覆盖真实 TeX 成功或失败结果。
+- 补齐 Windows 首次安装的 Codex 工作区参数与只读安装审计，避免文件安装通过掩盖项目绑定缺失。区分 app-server 后台项目绑定与 Desktop 侧栏归类，后者仍可能需要 Move 操作。
+- 实际 Chrome 已验证项目同步、跨文件工具读取、刷新历史、排队/引导/停止后保留、Desktop 发起问答回流、真实 DeepSeek 与取消、Code/Visual 本机预览、云端 TeX、项目宏补全与撤销、公式复制、只读持久镜像、最后页面退出自动回收及显式清理/重新同步。详细证据与尚未覆盖的边界见 docs/windows-connection-acceptance.md。
+
+## 0.12.16 Windows development — 2026-11-06（独立开发分支，未发布）
+
+- 修复真实 Chrome 的 32 位 documentId 被 36 位 UUID 校验拒绝、导致完整项目无法同步的问题。页面身份仍由可信 Chrome sender、顶层 frame、tab 和项目域名共同验证，并兼容已有页面租约。
+- 连接检查明确区分独立本机 Codex 后台、项目读取工具和页面缓存状态；检查工具目录，不把登录信息与模型列表成功表述成实际推理或桌面连接成功。
+- 项目同步失败时显示发送前置条件受阻，旧状态检查结果及关闭提示不会恢复成功标志；保留草稿与引用，不自动重发问题。
+
+## 0.12.15 Windows development — 2026-11-06（独立开发分支，未发布）
+
+- 新增当前用户 Native Messaging 注册和可重复安装；固定扩展身份保留。Windows 数据放在用户目录 `.overleaf-personal-tools`，避免 MSIX LocalAppData 重定向。启动器处理 UTF-8 路径；缺失 manifest 的卸载仍清理仅属于本安装的注册值。
+- Windows 私有存储使用受保护 ACL、reparse/junction 拒绝、真实跨进程锁和不可覆盖原子发布；底层文件描述符启用 O_BINARY，修复 SQLite 和原始字节在文本模式下损坏。MCP stdio 明确输出 UTF-8；reader 更新摘要包含权限/锁依赖。
+- Codex Desktop named pipe 使用真实协议并验证服务端用户、session、package、可执行路径。独立 app-server 隐藏且挂起启动，先进入 Job Object 再恢复，退出清理后代。保留 macOS 分支。
+- Windows TeX 使用无网络 capability 的 AppContainer 和 Job Object，提供三个编译器、取消/超时/断开清理与越界文件/网络验证；缺少必要权限或依赖时明确失败，不回退无沙盒。API 模式在 Windows 通过可检查取消状态的分段 socket 读取中止阻塞响应；保留空闲超时和 UTF-8 跨片段完整性，不重试网络请求。
+- 项目缓存增加普通、按需和本地保留模式、原路径只读版本镜像、缓存信息与显式清理。持久页面租约、排队和活动请求保护记录与同锁回收，避免刷新、后台休眠或结果不明时误删；旧缓存和本地保留版本不自动删除。
+- 修复 Windows CRLF hashbang、文件 URL 和过量测试并发。完整测试结果、真实页面用户确认与未验收边界记录在 docs/windows-acceptance.md。
+
 ## 0.12.14 — 2026-11-02
 
 - LaTeX Preview 的项目支持区域新增绿色 Reconnect editor／重新连接编辑器按钮，折叠详情时也可使用。沿用原生按钮样式；连接中与确认结果在预留的灰色状态行显示，不再产生布局跳动。无需二次确认，不受项目索引忙碌影响。

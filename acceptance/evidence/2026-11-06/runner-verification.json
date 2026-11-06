@@ -1,0 +1,163 @@
+{
+  "schemaVersion": 1,
+  "checkedAt": "2026-11-06T08:09:26.548655+00:00",
+  "extensionVersion": "0.12.17",
+  "automatedResult": "PASS",
+  "overallResult": "MANUAL",
+  "modelRequests": 0,
+  "browserAutomated": false,
+  "desktopSidebarVerified": false,
+  "setupRequested": true,
+  "checks": [
+    {
+      "id": "platform",
+      "status": "PASS",
+      "detail": "Windows; same account as Chrome is required."
+    },
+    {
+      "id": "build-tools",
+      "status": "PASS",
+      "detail": "Node 22+ and pnpm found."
+    },
+    {
+      "id": "dependencies",
+      "status": "PASS",
+      "detail": "Completed.",
+      "seconds": 1.06,
+      "timedOut": false,
+      "exitCode": 0,
+      "outputTruncated": false
+    },
+    {
+      "id": "build",
+      "status": "PASS",
+      "detail": "Completed.",
+      "seconds": 1.67,
+      "timedOut": false,
+      "exitCode": 0,
+      "outputTruncated": false
+    },
+    {
+      "id": "register-codex-api",
+      "status": "PASS",
+      "detail": "Completed.",
+      "seconds": 7.06,
+      "timedOut": false,
+      "exitCode": 0,
+      "outputTruncated": false
+    },
+    {
+      "id": "register-tex",
+      "status": "PASS",
+      "detail": "Completed.",
+      "seconds": 0.22,
+      "timedOut": false,
+      "exitCode": 0,
+      "outputTruncated": false
+    },
+    {
+      "id": "frontend-regression",
+      "status": "PASS",
+      "detail": "Completed.",
+      "seconds": 73.52,
+      "timedOut": false,
+      "exitCode": 0,
+      "outputTruncated": false
+    },
+    {
+      "id": "native-regression",
+      "status": "PASS",
+      "detail": "Completed.",
+      "seconds": 145.34,
+      "timedOut": false,
+      "exitCode": 0,
+      "outputTruncated": false,
+      "total": 421,
+      "skipped": 15
+    },
+    {
+      "id": "runner-regression",
+      "status": "PASS",
+      "detail": "Completed.",
+      "seconds": 1.81,
+      "timedOut": false,
+      "exitCode": 0,
+      "outputTruncated": false,
+      "total": 24,
+      "skipped": 0
+    },
+    {
+      "id": "installation",
+      "status": "PASS",
+      "detail": "Installed files, versions, registration and requested workspace match.",
+      "pythonCopiesMatched": 14,
+      "pythonCopiesChecked": 14,
+      "workspaceConfigured": true,
+      "backendProjectVerified": false
+    },
+    {
+      "id": "codex-health",
+      "status": "PASS",
+      "detail": "Local Codex authentication and project reader checked; no inference or Desktop connection was tested.",
+      "health": {
+        "available": true,
+        "authenticated": true,
+        "projectReaderReady": true,
+        "standalone": true,
+        "ready": true,
+        "version": "0.12.17"
+      },
+      "timedOut": false
+    },
+    {
+      "id": "tex-health",
+      "status": "PASS",
+      "detail": "Sandbox compiled a disposable formula.",
+      "health": {
+        "available": true,
+        "sandbox": true,
+        "ready": true,
+        "version": "0.2.1"
+      },
+      "timedOut": false
+    },
+    {
+      "id": "synthetic-zip",
+      "status": "PASS",
+      "detail": "Prepared artifacts/acceptance-project.zip from the two committed synthetic files."
+    }
+  ],
+  "manualChecks": [
+    {
+      "id": "chrome",
+      "status": "MANUAL",
+      "detail": "Load dist in chrome://extensions once (or Reload the existing extension), then refresh Overleaf."
+    },
+    {
+      "id": "synthetic-project",
+      "status": "MANUAL",
+      "detail": "Upload artifacts/acceptance-project.zip as a NEW Overleaf project; do not test on a manuscript."
+    },
+    {
+      "id": "inference",
+      "status": "MANUAL",
+      "detail": "Follow acceptance/README.md: read both test files and verify the two sentinels."
+    },
+    {
+      "id": "interaction",
+      "status": "MANUAL",
+      "detail": "Verify Stop retains partial text after refresh, queue/steer, formula copy, preview and cache lifecycle using the guide."
+    },
+    {
+      "id": "desktop",
+      "status": "MANUAL",
+      "detail": "Open the same test conversation in Codex; verify both directions and separately check sidebar project membership. Move it if needed."
+    },
+    {
+      "id": "local-preview",
+      "status": "MANUAL",
+      "detail": "In LaTeX Preview choose TeX / Local and verify an actual formula image in the test project."
+    }
+  ],
+  "guide": "acceptance/README.md"
+}
